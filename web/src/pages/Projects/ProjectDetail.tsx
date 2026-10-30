@@ -84,6 +84,8 @@ export default function ProjectDetail() {
   const [replyFooter, setReplyFooter] = useState(true);
   const [injectSender, setInjectSender] = useState(false);
   const [platformAllowFrom, setPlatformAllowFrom] = useState<Record<string, string>>({});
+  const [platformProgressStyle, setPlatformProgressStyle] = useState<Record<string, string>>({});
+  const [settingsError, setSettingsError] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Workspace mode (multi-workspace) settings
@@ -197,6 +199,11 @@ export default function ProjectDetail() {
           if (pc.allow_from !== undefined) afMap[pc.type] = pc.allow_from;
         });
         setPlatformAllowFrom(afMap);
+        const progressMap: Record<string, string> = {};
+        proj.value.platform_configs?.forEach(pc => {
+          if (pc.type === 'telegram') progressMap[pc.type] = pc.progress_style || 'compact';
+        });
+        setPlatformProgressStyle(progressMap);
       }
       if (provs.status === 'fulfilled') {
         setProviders(provs.value.providers || []);
@@ -248,13 +255,14 @@ export default function ProjectDetail() {
   const handleSaveSettings = async () => {
     if (!name) return;
     setSaving(true);
+    setSettingsError('');
     try {
       const agentTypeChanged = project && selectedAgentType !== project.agent_type;
       const res = await updateProject(name, {
         language,
         admin_from: adminFrom,
         disabled_commands: disabledCmds.split(',').map(s => s.trim()).filter(Boolean),
-        work_dir: workDir,
+        ...(project?.workspace_mode === 'multi-workspace' ? {} : { work_dir: workDir }),
         mode: agentMode,
         ...(agentTypeChanged ? { agent_type: selectedAgentType } : {}),
         show_context_indicator: showCtxIndicator,
@@ -262,12 +270,15 @@ export default function ProjectDetail() {
         reply_footer: replyFooter,
         inject_sender: injectSender,
         platform_allow_from: platformAllowFrom,
+        platform_progress_style: platformProgressStyle,
       });
       if (res && (res as any).restart_required) {
         setShowRestartModal(true);
         return;
       }
       await fetchAll();
+    } catch (error: unknown) {
+      setSettingsError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
     }
@@ -731,7 +742,11 @@ export default function ProjectDetail() {
                 <p className="text-[11px] text-amber-500 mt-1">{t('projects.agentTypeChangeHint', 'Changing agent type requires restart. Incompatible providers will be removed.')}</p>
               )}
             </div>
-            <Input label={t('projects.workDir', 'Working directory')} value={workDir} onChange={(e) => setWorkDir(e.target.value)} placeholder="/path/to/project" />
+            {project.workspace_mode === 'multi-workspace' ? (
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('projects.multiWorkspaceWorkDirHint')}</p>
+            ) : (
+              <Input label={t('projects.workDir', 'Working directory')} value={workDir} onChange={(e) => setWorkDir(e.target.value)} placeholder="/path/to/project" />
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                 {t('projects.agentMode', 'Permission mode')}
@@ -810,6 +825,29 @@ export default function ProjectDetail() {
           </div>
         </Card>
 
+        {project.platform_configs?.some(pc => pc.type === 'telegram') && (
+          <Card>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">{t('projects.telegramReplies')}</h3>
+            <div className="flex items-center justify-between gap-4 max-w-lg">
+              <div>
+                <label id="telegram-collapse-label" className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('projects.collapseProgress')}</label>
+                <p id="telegram-collapse-hint" className="text-xs text-gray-500 dark:text-gray-400 mt-1">{t('projects.collapseProgressHint')}</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={platformProgressStyle.telegram === 'card'}
+                aria-labelledby="telegram-collapse-label"
+                aria-describedby="telegram-collapse-hint"
+                onClick={() => setPlatformProgressStyle(prev => ({ ...prev, telegram: prev.telegram === 'card' ? 'compact' : 'card' }))}
+                className={cn('w-10 h-6 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2', platformProgressStyle.telegram === 'card' ? 'bg-accent' : 'bg-gray-300 dark:bg-gray-700')}
+              >
+                <span className={cn('block w-4 h-4 bg-white rounded-full transition-transform mx-1', platformProgressStyle.telegram === 'card' ? 'translate-x-4' : 'translate-x-0')} />
+              </button>
+            </div>
+          </Card>
+        )}
+
         {/* Per-platform allow_from */}
         {project.platform_configs && project.platform_configs.length > 0 && (
         <Card>
@@ -829,6 +867,7 @@ export default function ProjectDetail() {
         )}
 
         <div className="max-w-lg">
+          {settingsError && <p role="alert" className="text-sm text-red-500 mb-3">{settingsError}</p>}
           <Button loading={saving} onClick={handleSaveSettings}>{t('common.save')}</Button>
         </div>
         <Card>

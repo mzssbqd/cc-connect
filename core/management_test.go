@@ -79,6 +79,59 @@ type mgmtResponse struct {
 	Error string          `json:"error,omitempty"`
 }
 
+type managementProgressPlatform struct{ stubCompactProgressPlatform }
+
+func (p *managementProgressPlatform) SetProgressStyle(style string) { p.style = style }
+
+func TestMgmt_ProjectProgressStylePersistsAndAppliesWithoutRestart(t *testing.T) {
+	m, ts, engine := testManagementServer(t, "tok")
+	p := &managementProgressPlatform{stubCompactProgressPlatform: stubCompactProgressPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}, style: "compact"}}
+	engine.platforms = []Platform{p}
+	stored := "compact"
+	m.SetSaveProjectSettings(func(_ string, patch ProjectSettingsUpdate) error {
+		stored = patch.PlatformProgressStyle["test"]
+		return nil
+	})
+	m.SetGetProjectConfig(func(string) map[string]any {
+		return map[string]any{"platform_configs": []map[string]any{{"type": "test", "progress_style": stored}}}
+	})
+	for _, style := range []string{"card", "compact", "card"} {
+		result := mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{"platform_progress_style": map[string]string{"test": style}})
+		if !result.OK {
+			t.Fatalf("save progress setting: %s", result.Error)
+		}
+		var saved map[string]any
+		if err := json.Unmarshal(result.Data, &saved); err != nil {
+			t.Fatal(err)
+		}
+		if saved["restart_required"] == true || p.ProgressStyle() != style || stored != style {
+			t.Fatalf("setting did not persist and apply without restart: %#v, runtime=%s stored=%s", saved, p.ProgressStyle(), stored)
+		}
+		result = mgmtGet(t, ts.URL+"/api/v1/projects/test-project", "tok")
+		var detail struct {
+			Platforms []struct {
+				Style string `json:"progress_style"`
+			} `json:"platform_configs"`
+		}
+		if err := json.Unmarshal(result.Data, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if len(detail.Platforms) != 1 || detail.Platforms[0].Style != style {
+			t.Fatalf("reloaded settings lost progress style: %#v", detail)
+		}
+	}
+	// A failed disk write must leave the live setting unchanged and report failure.
+	m.SetSaveProjectSettings(func(string, ProjectSettingsUpdate) error { return errors.New("disk full") })
+	result := mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{"platform_progress_style": map[string]string{"test": "compact"}})
+	if result.OK || p.ProgressStyle() != "card" {
+		t.Fatal("failed save must not report success or change the live style")
+	}
+	result = mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{"platform_progress_style": map[string]string{"test": "invalid"}})
+	if result.OK {
+		t.Fatal("invalid progress style should be rejected")
+	}
+}
+
 func mgmtGet(t *testing.T, url, token string) mgmtResponse {
 	t.Helper()
 	req, _ := http.NewRequest("GET", url, nil)

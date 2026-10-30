@@ -2879,6 +2879,42 @@ func TestSaveProjectSettings_ExtraFields(t *testing.T) {
 	}
 }
 
+func TestSaveProjectSettings_ProgressStyleRoundTripPreservesCredentials(t *testing.T) {
+	configPath := writeConfigFixture(t, feishuConfigFixture)
+	patchConfigPath(t, configPath)
+	before := readConfigFixture(t, configPath).Projects[0].Platforms[0].Options
+	for _, style := range []string{"card", "compact", "card"} {
+		if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{PlatformProgressStyle: map[string]string{"telegram": style}}); err != nil {
+			t.Fatal(err)
+		}
+		cfg := readConfigFixture(t, configPath)
+		opts := cfg.Projects[0].Platforms[0].Options
+		if opts["progress_style"] != style || opts["token"] != before["token"] || opts["allow_from"] != before["allow_from"] {
+			t.Fatalf("progress setting changed unrelated credentials/options: %#v", opts)
+		}
+		details := GetProjectConfigDetails("alpha")["platform_configs"].([]map[string]any)
+		if details[0]["progress_style"] != style {
+			t.Fatalf("settings API should expose saved progress style: %#v", details)
+		}
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, update := range []map[string]string{{"telegram": "invalid"}, {"missing": "card"}} {
+		if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{PlatformProgressStyle: update}); err == nil {
+			t.Fatal("invalid progress update accepted")
+		}
+		after, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(data) {
+			t.Fatal("invalid progress update modified the file")
+		}
+	}
+}
+
 func TestSaveProjectSettings_WorkspaceModeAndBaseDir(t *testing.T) {
 	configPath := writeConfigFixture(t, feishuConfigFixture)
 	patchConfigPath(t, configPath)
@@ -2929,6 +2965,47 @@ func TestSaveProjectSettings_WorkspaceModeRequiresBaseDir(t *testing.T) {
 	err := SaveProjectSettings("alpha", ProjectSettingsUpdate{WorkspaceMode: &wsMode})
 	if err == nil {
 		t.Fatal("expected error enabling multi-workspace mode without base_dir, got nil")
+	}
+}
+
+func TestSaveProjectSettings_MultiWorkspaceNeverPersistsSingleWorkDir(t *testing.T) {
+	configPath := writeConfigFixture(t, feishuConfigFixture)
+	patchConfigPath(t, configPath)
+	mode, baseDir := "multi-workspace", t.TempDir()
+	if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{WorkspaceMode: &mode, WorkspaceBaseDir: &baseDir}); err != nil {
+		t.Fatal(err)
+	}
+	assertValid := func() *Config {
+		t.Helper()
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("saved settings must remain loadable by startup and Web console: %v", err)
+		}
+		if cfg.Projects[0].Mode == "multi-workspace" {
+			if _, exists := cfg.Projects[0].Agent.Options["work_dir"]; exists {
+				t.Fatal("multi-workspace must not retain a single work_dir")
+			}
+		}
+		return cfg
+	}
+	assertValid()
+	// An older Web client can still submit work_dir with general settings.
+	// Saving those settings must not recreate the startup-breaking conflict.
+	staleWorkDir := t.TempDir()
+	if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{WorkDir: &staleWorkDir, PlatformProgressStyle: map[string]string{"telegram": "card"}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := assertValid()
+	if cfg.Projects[0].BaseDir != baseDir || cfg.Projects[0].Platforms[0].Options["progress_style"] != "card" {
+		t.Fatal("general settings must preserve workspace mode and still save platform preferences")
+	}
+	single := "single"
+	if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{WorkspaceMode: &single, WorkDir: &staleWorkDir}); err != nil {
+		t.Fatal(err)
+	}
+	cfg = assertValid()
+	if cfg.Projects[0].Agent.Options["work_dir"] != staleWorkDir {
+		t.Fatal("returning to single-workspace mode must accept a working directory")
 	}
 }
 

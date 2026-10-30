@@ -95,11 +95,21 @@ token = "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz-123456"
 # proxy = "http://127.0.0.1:7890"
 # proxy_username = ""
 # proxy_password = ""
+
+# Show progress while working; collapse it into an expandable quote when done.
+# The final answer is sent separately. Failed progress stays expanded.
+progress_style = "card"
 ```
 
 > **Common mistake:** `admin_from` goes under `[[projects]]` (project level), NOT inside `[projects.platforms.options]`. If placed in the wrong section, it will be silently ignored.
 >
 > To find your Telegram user ID, send any message to **@userinfobot**.
+
+In the Web console, open **Projects → your project → Settings → Telegram replies**.
+Enable **Collapse progress after completion** and save. The setting is stored in
+`config.toml` and applies to new messages without restarting the service. Turn it
+off to keep completed progress expanded. Only the execution log is folded; the
+final answer stays in a separate message. Failed execution remains expanded.
 
 ### 2.1 Optional: Use a Proxy
 

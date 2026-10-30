@@ -3432,17 +3432,18 @@ func extractLineComment(line string) string {
 
 // ProjectSettingsUpdate carries optional field updates for SaveProjectSettings.
 type ProjectSettingsUpdate struct {
-	Language             *string
-	AdminFrom            *string
-	DisabledCommands     []string
-	WorkDir              *string
-	Mode                 *string
-	AgentType            *string
-	ShowContextIndicator *bool
-	ShowWorkdirIndicator *bool
-	ReplyFooter          *bool
-	InjectSender         *bool
-	PlatformAllowFrom    map[string]string
+	Language              *string
+	AdminFrom             *string
+	DisabledCommands      []string
+	WorkDir               *string
+	Mode                  *string
+	AgentType             *string
+	ShowContextIndicator  *bool
+	ShowWorkdirIndicator  *bool
+	ReplyFooter           *bool
+	InjectSender          *bool
+	PlatformAllowFrom     map[string]string
+	PlatformProgressStyle map[string]string
 	// WorkspaceMode and WorkspaceBaseDir control the project-level
 	// multi-workspace feature (ProjectConfig.Mode/BaseDir), distinct from
 	// Mode above (which is the agent permission mode, e.g. yolo/plan).
@@ -3573,6 +3574,15 @@ func SaveProjectSettings(projectName string, update ProjectSettingsUpdate) error
 			}
 			proj.Mode = mode
 		}
+		// Workspaces choose their own directories under base_dir. Keeping a
+		// single agent work_dir makes the saved config fail startup validation,
+		// including when an older Web client submits it with general settings.
+		if proj.Mode == "multi-workspace" {
+			if strings.TrimSpace(proj.BaseDir) == "" {
+				return fmt.Errorf("workspace_base_dir is required to enable multi-workspace mode")
+			}
+			delete(proj.Agent.Options, "work_dir")
+		}
 		if update.PlatformAllowFrom != nil {
 			for j := range proj.Platforms {
 				typ := strings.TrimSpace(proj.Platforms[j].Type)
@@ -3594,6 +3604,25 @@ func SaveProjectSettings(projectName string, update ProjectSettingsUpdate) error
 					proj.Platforms[j].Options = map[string]any{}
 				}
 				proj.Platforms[j].Options["allow_from"] = strings.TrimSpace(af)
+			}
+		}
+		for platformName, style := range update.PlatformProgressStyle {
+			if style != "legacy" && style != "compact" && style != "card" {
+				return fmt.Errorf("invalid progress_style %q", style)
+			}
+			found := false
+			for j := range proj.Platforms {
+				if proj.Platforms[j].Type != platformName {
+					continue
+				}
+				if proj.Platforms[j].Options == nil {
+					proj.Platforms[j].Options = map[string]any{}
+				}
+				proj.Platforms[j].Options["progress_style"] = style
+				found = true
+			}
+			if !found {
+				return fmt.Errorf("platform %q not found", platformName)
 			}
 		}
 		return saveConfig(cfg)
@@ -3651,6 +3680,9 @@ func GetProjectConfigDetails(projectName string) map[string]any {
 			if plat.Options != nil {
 				if af, ok := plat.Options["allow_from"].(string); ok {
 					pc["allow_from"] = af
+				}
+				if style, ok := plat.Options["progress_style"].(string); ok {
+					pc["progress_style"] = style
 				}
 			}
 			platConfigs[j] = pc

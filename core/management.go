@@ -20,19 +20,20 @@ import (
 // ProjectSettingsUpdate is passed to SetSaveProjectSettings to persist management API PATCH fields.
 // The implementation (typically in cmd/cc-connect) maps this to config.ProjectSettingsUpdate.
 type ProjectSettingsUpdate struct {
-	Language             *string
-	AdminFrom            *string
-	DisabledCommands     []string
-	WorkDir              *string
-	Mode                 *string
-	AgentType            *string
-	ShowContextIndicator *bool
-	ShowWorkdirIndicator *bool
-	ReplyFooter          *bool
-	InjectSender         *bool
-	PlatformAllowFrom    map[string]string
-	WorkspaceMode        *string
-	WorkspaceBaseDir     *string
+	Language              *string
+	AdminFrom             *string
+	DisabledCommands      []string
+	WorkDir               *string
+	Mode                  *string
+	AgentType             *string
+	ShowContextIndicator  *bool
+	ShowWorkdirIndicator  *bool
+	ReplyFooter           *bool
+	InjectSender          *bool
+	PlatformAllowFrom     map[string]string
+	PlatformProgressStyle map[string]string
+	WorkspaceMode         *string
+	WorkspaceBaseDir      *string
 }
 
 // ManagementServer provides an HTTP REST API for external management tools
@@ -148,10 +149,10 @@ type GlobalProviderInfo struct {
 		Model string `json:"model"`
 		Alias string `json:"alias,omitempty"`
 	} `json:"models,omitempty"`
-	Endpoints       map[string]string              `json:"endpoints,omitempty"`
-	AgentModels     map[string]string              `json:"agent_models,omitempty"`
-	AgentModelLists map[string][]GlobalModelEntry   `json:"agent_model_lists,omitempty"`
-	Codex           *GlobalCodexConfig              `json:"codex,omitempty"`
+	Endpoints       map[string]string             `json:"endpoints,omitempty"`
+	AgentModels     map[string]string             `json:"agent_models,omitempty"`
+	AgentModelLists map[string][]GlobalModelEntry `json:"agent_model_lists,omitempty"`
+	Codex           *GlobalCodexConfig            `json:"codex,omitempty"`
 }
 
 // GlobalModelEntry is a model entry inside AgentModelLists.
@@ -415,9 +416,9 @@ func (m *ManagementServer) handleStatus(w http.ResponseWriter, r *http.Request) 
 				info := ph.PlatformHealth()
 				if info.Degraded {
 					entry := map[string]any{
-						"name":    info.Name,
-						"reason":  info.DegradedReason,
-						"since":   info.DegradedSince,
+						"name":   info.Name,
+						"reason": info.DegradedReason,
+						"since":  info.DegradedSince,
 					}
 					degradedEntries = append(degradedEntries, entry)
 				}
@@ -744,22 +745,47 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 
 	if r.Method == http.MethodPatch {
 		var body struct {
-			Language             *string           `json:"language"`
-			AdminFrom            *string           `json:"admin_from"`
-			DisabledCommands     []string          `json:"disabled_commands"`
-			WorkDir              *string           `json:"work_dir"`
-			Mode                 *string           `json:"mode"`
-			AgentType            *string           `json:"agent_type"`
-			ShowContextIndicator *bool             `json:"show_context_indicator"`
-			ShowWorkdirIndicator *bool             `json:"show_workdir_indicator"`
-			ReplyFooter          *bool             `json:"reply_footer"`
-			InjectSender         *bool             `json:"inject_sender"`
-			PlatformAllowFrom    map[string]string `json:"platform_allow_from"`
-			WorkspaceMode        *string           `json:"workspace_mode"`
-			WorkspaceBaseDir     *string           `json:"workspace_base_dir"`
+			Language              *string           `json:"language"`
+			AdminFrom             *string           `json:"admin_from"`
+			DisabledCommands      []string          `json:"disabled_commands"`
+			WorkDir               *string           `json:"work_dir"`
+			Mode                  *string           `json:"mode"`
+			AgentType             *string           `json:"agent_type"`
+			ShowContextIndicator  *bool             `json:"show_context_indicator"`
+			ShowWorkdirIndicator  *bool             `json:"show_workdir_indicator"`
+			ReplyFooter           *bool             `json:"reply_footer"`
+			InjectSender          *bool             `json:"inject_sender"`
+			PlatformAllowFrom     map[string]string `json:"platform_allow_from"`
+			PlatformProgressStyle map[string]string `json:"platform_progress_style"`
+			WorkspaceMode         *string           `json:"workspace_mode"`
+			WorkspaceBaseDir      *string           `json:"workspace_base_dir"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			mgmtError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		progressSetters := make(map[string]ProgressStyleSetter)
+		for platformName, style := range body.PlatformProgressStyle {
+			switch style {
+			case progressStyleLegacy, progressStyleCompact, progressStyleCard:
+			default:
+				mgmtError(w, http.StatusBadRequest, "invalid platform progress style")
+				return
+			}
+			for _, platform := range e.platforms {
+				if platform.Name() == platformName {
+					if setter, ok := platform.(ProgressStyleSetter); ok {
+						progressSetters[platformName] = setter
+					}
+				}
+			}
+			if progressSetters[platformName] == nil {
+				mgmtError(w, http.StatusBadRequest, "platform does not support progress style updates")
+				return
+			}
+		}
+		if len(progressSetters) > 0 && m.saveProjectSettings == nil {
+			mgmtError(w, http.StatusNotImplemented, "project settings persistence not configured")
 			return
 		}
 		if body.WorkDir != nil {
@@ -867,23 +893,31 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 
 		if m.saveProjectSettings != nil {
 			patch := ProjectSettingsUpdate{
-				Language:             body.Language,
-				AdminFrom:            body.AdminFrom,
-				DisabledCommands:     body.DisabledCommands,
-				WorkDir:              body.WorkDir,
-				Mode:                 body.Mode,
-				AgentType:            body.AgentType,
-				ShowContextIndicator: body.ShowContextIndicator,
-				ShowWorkdirIndicator: body.ShowWorkdirIndicator,
-				ReplyFooter:          body.ReplyFooter,
-				InjectSender:         body.InjectSender,
-				PlatformAllowFrom:    body.PlatformAllowFrom,
-				WorkspaceMode:        body.WorkspaceMode,
-				WorkspaceBaseDir:     body.WorkspaceBaseDir,
+				Language:              body.Language,
+				AdminFrom:             body.AdminFrom,
+				DisabledCommands:      body.DisabledCommands,
+				WorkDir:               body.WorkDir,
+				Mode:                  body.Mode,
+				AgentType:             body.AgentType,
+				ShowContextIndicator:  body.ShowContextIndicator,
+				ShowWorkdirIndicator:  body.ShowWorkdirIndicator,
+				ReplyFooter:           body.ReplyFooter,
+				InjectSender:          body.InjectSender,
+				PlatformAllowFrom:     body.PlatformAllowFrom,
+				PlatformProgressStyle: body.PlatformProgressStyle,
+				WorkspaceMode:         body.WorkspaceMode,
+				WorkspaceBaseDir:      body.WorkspaceBaseDir,
 			}
 			if err := m.saveProjectSettings(name, patch); err != nil {
 				slog.Warn("management: failed to persist project settings", "project", name, "error", err)
+				if len(progressSetters) > 0 {
+					mgmtError(w, http.StatusInternalServerError, "failed to persist project settings")
+					return
+				}
 			}
+		}
+		for platformName, setter := range progressSetters {
+			setter.SetProgressStyle(body.PlatformProgressStyle[platformName])
 		}
 
 		resp := map[string]any{"message": "settings updated"}
@@ -2152,10 +2186,10 @@ func (m *ManagementServer) handleCCSwitchProviders(w http.ResponseWriter, r *htt
 // applying per-agent-type overrides for base_url, model, and models.
 func resolveGlobalProviderForAgent(g GlobalProviderInfo, agentType string) ProviderConfig {
 	pc := ProviderConfig{
-		Name:   g.Name,
-		APIKey: g.APIKey,
+		Name:    g.Name,
+		APIKey:  g.APIKey,
 		BaseURL: g.BaseURL,
-		Model:  g.Model,
+		Model:   g.Model,
 	}
 	if ep, ok := g.Endpoints[agentType]; ok && ep != "" {
 		pc.BaseURL = ep

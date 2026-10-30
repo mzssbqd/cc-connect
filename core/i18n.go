@@ -194,6 +194,10 @@ type MsgKey string
 const (
 	MsgStarting                  MsgKey = "starting"
 	MsgThinking                  MsgKey = "thinking"
+	MsgProgressRunning           MsgKey = "progress_running"
+	MsgProgressCompleted         MsgKey = "progress_completed"
+	MsgProgressFailed            MsgKey = "progress_failed"
+	MsgProgressTruncated         MsgKey = "progress_truncated"
 	MsgTool                      MsgKey = "tool"
 	MsgToolResult                MsgKey = "tool_result"
 	MsgToolResultFmtStatus       MsgKey = "tool_result_fmt_status"
@@ -701,6 +705,34 @@ const (
 )
 
 var messages = map[MsgKey]map[Language]string{
+	MsgProgressRunning: {
+		LangEnglish:            "⏳ Execution progress",
+		LangChinese:            "⏳ 执行过程",
+		LangTraditionalChinese: "⏳ 執行過程",
+		LangJapanese:           "⏳ 実行状況",
+		LangSpanish:            "⏳ Progreso de ejecución",
+	},
+	MsgProgressCompleted: {
+		LangEnglish:            "✅ Execution complete · expand for details",
+		LangChinese:            "✅ 执行完成 · 展开查看过程",
+		LangTraditionalChinese: "✅ 執行完成 · 展開查看過程",
+		LangJapanese:           "✅ 実行完了 · 展開して詳細を表示",
+		LangSpanish:            "✅ Ejecución completada · expandir detalles",
+	},
+	MsgProgressFailed: {
+		LangEnglish:            "❌ Execution failed",
+		LangChinese:            "❌ 执行失败",
+		LangTraditionalChinese: "❌ 執行失敗",
+		LangJapanese:           "❌ 実行失敗",
+		LangSpanish:            "❌ Error de ejecución",
+	},
+	MsgProgressTruncated: {
+		LangEnglish:            "… Showing latest progress only.",
+		LangChinese:            "… 仅显示最近的执行过程。",
+		LangTraditionalChinese: "… 僅顯示最近的執行過程。",
+		LangJapanese:           "… 最新の実行状況のみ表示しています。",
+		LangSpanish:            "… Solo se muestra el progreso más reciente.",
+	},
 	MsgStarting: {
 		LangEnglish:            "⏳ Processing...",
 		LangChinese:            "⏳ 处理中...",

@@ -11,6 +11,7 @@ export interface ProjectSummary {
 export interface PlatformConfigInfo {
   type: string;
   allow_from?: string;
+  progress_style?: string;
 }
 
 export interface ProjectDetail {
@@ -54,6 +55,7 @@ export interface ProjectSettingsUpdate {
   reply_footer?: boolean;
   inject_sender?: boolean;
   platform_allow_from?: Record<string, string>;
+  platform_progress_style?: Record<string, string>;
   workspace_mode?: string;
   workspace_base_dir?: string;
 }

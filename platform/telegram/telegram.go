@@ -164,10 +164,8 @@ func New(opts map[string]any) (core.Platform, error) {
 	shareSessionInChannel, _ := opts["share_session_in_channel"].(bool)
 	enableReactions, _ := opts["enable_reactions"].(bool)
 
-	// Default to "compact" so streaming edits work out of the box. Telegram has
-	// no rich card UI, so "card" is normalized to "compact". Users can opt out
-	// via progress_style = "legacy" to restore the old "send full text once"
-	// behavior.
+	// Keep the existing compact default. Opt into "card" to fold completed
+	// progress into Telegram's expandable block quotations.
 	progressStyle := "compact"
 	if v, ok := opts["progress_style"].(string); ok {
 		switch strings.ToLower(strings.TrimSpace(v)) {
@@ -175,8 +173,10 @@ func New(opts map[string]any) (core.Platform, error) {
 			// keep default
 		case "legacy":
 			progressStyle = "legacy"
-		case "compact", "card":
+		case "compact":
 			progressStyle = "compact"
+		case "card":
+			progressStyle = "card"
 		default:
 			return nil, fmt.Errorf("telegram: invalid progress_style %q (want legacy, compact, or card)", v)
 		}
@@ -206,10 +206,21 @@ func (p *Platform) Name() string { return "telegram" }
 // To restore the old single-send behavior set progress_style = "legacy" in
 // the platform options.
 func (p *Platform) ProgressStyle() string {
-	if p == nil || p.progressStyle == "" {
+	if p == nil {
+		return "compact"
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.progressStyle == "" {
 		return "compact"
 	}
 	return p.progressStyle
+}
+
+func (p *Platform) SetProgressStyle(style string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.progressStyle = style
 }
 
 func (p *Platform) Start(handler core.MessageHandler) error {
@@ -1425,7 +1436,7 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 		return nil, err
 	}
 
-	html := core.MarkdownToSimpleHTML(content)
+	html, plain := renderTelegramPreview(content)
 	params := &tgbot.SendMessageParams{
 		ChatID:          rc.chatID,
 		MessageThreadID: rc.threadID,
@@ -1444,7 +1455,7 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 				"html_prefix", truncateForLog(html, 200),
 				"html_len", len(html),
 			)
-			params.Text = content
+			params.Text = plain
 			params.ParseMode = ""
 			sent, err = bot.SendMessage(ctx, params)
 		} else if strings.Contains(errMsg, "message is too long") {
@@ -1454,7 +1465,7 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 				"html_len", len(html),
 				"content_len", len(content),
 			)
-			params.Text = content
+			params.Text = plain
 			params.ParseMode = ""
 			sent, err = bot.SendMessage(ctx, params)
 		}
@@ -1476,7 +1487,7 @@ func (p *Platform) UpdateMessage(ctx context.Context, previewHandle any, content
 		return err
 	}
 
-	html := core.MarkdownToSimpleHTML(content)
+	html, plain := renderTelegramPreview(content)
 	slog.Debug("telegram: UpdateMessage",
 		"content_len", len(content), "html_len", len(html),
 		"content_prefix", truncateForLog(content, 80),
@@ -1502,7 +1513,7 @@ func (p *Platform) UpdateMessage(ctx context.Context, previewHandle any, content
 				"html_prefix", truncateForLog(html, 200),
 				"html_len", len(html),
 			)
-			params.Text = content
+			params.Text = plain
 			params.ParseMode = ""
 			if _, err2 := bot.EditMessageText(ctx, params); err2 != nil {
 				if strings.Contains(err2.Error(), "not modified") {

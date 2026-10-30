@@ -988,7 +988,7 @@ func TestNewProgressStyleOptions(t *testing.T) {
 	}{
 		{name: "explicit compact", input: "compact", wantMode: "compact"},
 		{name: "explicit legacy", input: "legacy", wantMode: "legacy"},
-		{name: "card normalized to compact", input: "card", wantMode: "compact"},
+		{name: "card supports completed progress folding", input: "card", wantMode: "card"},
 		{name: "uppercase tolerated", input: "COMPACT", wantMode: "compact"},
 		{name: "whitespace tolerated", input: "  legacy  ", wantMode: "legacy"},
 		{name: "empty string keeps default", input: "", wantMode: "compact"},
@@ -1035,4 +1035,3 @@ func TestProgressStyleProviderInterface(t *testing.T) {
 		t.Fatalf("ProgressStyle() = %q, want compact", got)
 	}
 }
-

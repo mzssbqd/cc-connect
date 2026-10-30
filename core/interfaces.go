@@ -280,6 +280,12 @@ type ProgressStyleProvider interface {
 	ProgressStyle() string
 }
 
+// ProgressStyleSetter lets management settings update future turns without
+// restarting the platform connection. An in-flight turn keeps its own style.
+type ProgressStyleSetter interface {
+	SetProgressStyle(style string)
+}
+
 // ProgressCardPayloadSupport is an optional interface for platforms that can
 // parse and render structured progress-card payloads.
 type ProgressCardPayloadSupport interface {

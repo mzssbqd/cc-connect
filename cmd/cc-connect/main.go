@@ -1173,19 +1173,20 @@ func main() {
 		mgmtSrv.SetRemoveProject(config.RemoveProject)
 		mgmtSrv.SetSaveProjectSettings(func(name string, u core.ProjectSettingsUpdate) error {
 			return config.SaveProjectSettings(name, config.ProjectSettingsUpdate{
-				Language:             u.Language,
-				AdminFrom:            u.AdminFrom,
-				DisabledCommands:     u.DisabledCommands,
-				WorkDir:              u.WorkDir,
-				Mode:                 u.Mode,
-				AgentType:            u.AgentType,
-				ShowContextIndicator: u.ShowContextIndicator,
-				ShowWorkdirIndicator: u.ShowWorkdirIndicator,
-				ReplyFooter:          u.ReplyFooter,
-				InjectSender:         u.InjectSender,
-				PlatformAllowFrom:    u.PlatformAllowFrom,
-				WorkspaceMode:        u.WorkspaceMode,
-				WorkspaceBaseDir:     u.WorkspaceBaseDir,
+				Language:              u.Language,
+				AdminFrom:             u.AdminFrom,
+				DisabledCommands:      u.DisabledCommands,
+				WorkDir:               u.WorkDir,
+				Mode:                  u.Mode,
+				AgentType:             u.AgentType,
+				ShowContextIndicator:  u.ShowContextIndicator,
+				ShowWorkdirIndicator:  u.ShowWorkdirIndicator,
+				ReplyFooter:           u.ReplyFooter,
+				InjectSender:          u.InjectSender,
+				PlatformAllowFrom:     u.PlatformAllowFrom,
+				PlatformProgressStyle: u.PlatformProgressStyle,
+				WorkspaceMode:         u.WorkspaceMode,
+				WorkspaceBaseDir:      u.WorkspaceBaseDir,
 			})
 		})
 		mgmtSrv.SetGetProjectConfig(config.GetProjectConfigDetails)
