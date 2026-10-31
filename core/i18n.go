@@ -194,10 +194,6 @@ type MsgKey string
 const (
 	MsgStarting                  MsgKey = "starting"
 	MsgThinking                  MsgKey = "thinking"
-	MsgProgressRunning           MsgKey = "progress_running"
-	MsgProgressCompleted         MsgKey = "progress_completed"
-	MsgProgressFailed            MsgKey = "progress_failed"
-	MsgProgressTruncated         MsgKey = "progress_truncated"
 	MsgTool                      MsgKey = "tool"
 	MsgToolResult                MsgKey = "tool_result"
 	MsgToolResultFmtStatus       MsgKey = "tool_result_fmt_status"
@@ -220,6 +216,7 @@ const (
 	MsgToolAllowFailed           MsgKey = "tool_allow_failed"
 	MsgToolAllowedNew            MsgKey = "tool_allowed_new"
 	MsgError                     MsgKey = "error"
+	MsgSessionWriterBusy         MsgKey = "session_writer_busy"
 	MsgSessionNotFound           MsgKey = "session_not_found"
 	MsgFailedToStartAgentSession MsgKey = "failed_to_start_agent_session"
 	MsgFailedToDeleteSession     MsgKey = "failed_to_delete_session"
@@ -705,34 +702,178 @@ const (
 )
 
 var messages = map[MsgKey]map[Language]string{
-	MsgProgressRunning: {
-		LangEnglish:            "⏳ Execution progress",
-		LangChinese:            "⏳ 执行过程",
-		LangTraditionalChinese: "⏳ 執行過程",
-		LangJapanese:           "⏳ 実行状況",
-		LangSpanish:            "⏳ Progreso de ejecución",
+	MsgPanelEffortSaveFailed: {
+		LangEnglish:            "Could not save reasoning effort: %s",
+		LangChinese:            "努力程度保存失败：%s",
+		LangTraditionalChinese: "努力程度儲存失敗：%s",
+		LangJapanese:           "推論の強度を保存できませんでした: %s",
+		LangSpanish:            "No se pudo guardar el esfuerzo: %s",
 	},
-	MsgProgressCompleted: {
-		LangEnglish:            "✅ Execution complete · expand for details",
-		LangChinese:            "✅ 执行完成 · 展开查看过程",
-		LangTraditionalChinese: "✅ 執行完成 · 展開查看過程",
-		LangJapanese:           "✅ 実行完了 · 展開して詳細を表示",
-		LangSpanish:            "✅ Ejecución completada · expandir detalles",
+
+	MsgPanelEffortChanged: {
+		LangEnglish:            "Reasoning effort: %s. Applies to your next message; conversation history is preserved.",
+		LangChinese:            "努力程度已切换为 %s，下一条消息生效，保留当前会话历史。",
+		LangTraditionalChinese: "努力程度已切換為 %s，下一則訊息生效，保留目前對話歷史。",
+		LangJapanese:           "推論の強度を %s に変更しました。次のメッセージから適用され、履歴は保持されます。",
+		LangSpanish:            "Esfuerzo: %s. Se aplica al siguiente mensaje y conserva el historial.",
 	},
-	MsgProgressFailed: {
-		LangEnglish:            "❌ Execution failed",
-		LangChinese:            "❌ 执行失败",
-		LangTraditionalChinese: "❌ 執行失敗",
-		LangJapanese:           "❌ 実行失敗",
-		LangSpanish:            "❌ Error de ejecución",
+
+	MsgPanelReasoning: {
+		LangEnglish:            "Reasoning effort",
+		LangChinese:            "努力程度",
+		LangTraditionalChinese: "努力程度",
+		LangJapanese:           "推論の強度",
+		LangSpanish:            "Esfuerzo de razonamiento",
 	},
-	MsgProgressTruncated: {
-		LangEnglish:            "… Showing latest progress only.",
-		LangChinese:            "… 仅显示最近的执行过程。",
-		LangTraditionalChinese: "… 僅顯示最近的執行過程。",
-		LangJapanese:           "… 最新の実行状況のみ表示しています。",
-		LangSpanish:            "… Solo se muestra el progreso más reciente.",
+
+	MsgPanelHome: {
+		LangEnglish:            "Control panel",
+		LangChinese:            "控制面板",
+		LangTraditionalChinese: "控制面板",
+		LangJapanese:           "操作パネル",
+		LangSpanish:            "Panel de control",
 	},
+	MsgPanelModels: {
+		LangEnglish:            "Switch model",
+		LangChinese:            "切换模型",
+		LangTraditionalChinese: "切換模型",
+		LangJapanese:           "モデル切替",
+		LangSpanish:            "Cambiar modelo",
+	},
+	MsgPanelSessions: {
+		LangEnglish:            "Sessions",
+		LangChinese:            "会话列表",
+		LangTraditionalChinese: "對話列表",
+		LangJapanese:           "セッション",
+		LangSpanish:            "Sesiones",
+	},
+	MsgPanelNew: {
+		LangEnglish:            "New session",
+		LangChinese:            "新建会话",
+		LangTraditionalChinese: "新增對話",
+		LangJapanese:           "新規セッション",
+		LangSpanish:            "Nueva sesión",
+	},
+	MsgPanelSettings: {
+		LangEnglish:            "Settings",
+		LangChinese:            "设置",
+		LangTraditionalChinese: "設定",
+		LangJapanese:           "設定",
+		LangSpanish:            "Ajustes",
+	},
+	MsgPanelStop: {
+		LangEnglish:            "Stop generation",
+		LangChinese:            "停止生成",
+		LangTraditionalChinese: "停止生成",
+		LangJapanese:           "生成を停止",
+		LangSpanish:            "Detener generación",
+	},
+	MsgPanelExpired: {
+		LangEnglish:            "This panel is out of date. Open /panel to refresh.",
+		LangChinese:            "面板已过期，请打开 /panel 刷新。",
+		LangTraditionalChinese: "面板已過期，請開啟 /panel 重新整理。",
+		LangJapanese:           "パネルが古くなりました。/panel で更新してください。",
+		LangSpanish:            "El panel ha caducado. Abre /panel para actualizar.",
+	},
+	MsgPanelBusy: {
+		LangEnglish:            "A reply is in progress. Wait for it to finish, or stop it before switching.",
+		LangChinese:            "正在生成回答。请等待完成，或先停止生成再切换。",
+		LangTraditionalChinese: "正在生成回答。請等待完成，或先停止生成再切換。",
+		LangJapanese:           "回答を生成中です。完了を待つか、停止してから切り替えてください。",
+		LangSpanish:            "Hay una respuesta en curso. Espera o detenla antes de cambiar.",
+	},
+	MsgPanelSwitched: {
+		LangEnglish:            "Session switched. Your next message continues this conversation.",
+		LangChinese:            "会话已切换，下一条消息将继续此会话。",
+		LangTraditionalChinese: "對話已切換，下一則訊息將繼續此對話。",
+		LangJapanese:           "切り替えました。次のメッセージはこのセッションで続きます。",
+		LangSpanish:            "Sesión cambiada. El próximo mensaje continúa esta conversación.",
+	},
+	MsgPanelEnter: {
+		LangEnglish:            "Enter session",
+		LangChinese:            "进入会话",
+		LangTraditionalChinese: "進入對話",
+		LangJapanese:           "セッションを開く",
+		LangSpanish:            "Entrar en la sesión",
+	},
+	MsgPanelNewConfirm: {
+		LangEnglish:            "Create a new session? Previous conversations and history are kept.",
+		LangChinese:            "创建新会话？原有会话和历史记录会保留。",
+		LangTraditionalChinese: "建立新對話？原有對話與歷史記錄會保留。",
+		LangJapanese:           "新規セッションを作成しますか？既存の履歴は保持されます。",
+		LangSpanish:            "¿Crear una sesión nueva? Se conservan las conversaciones y el historial.",
+	},
+	MsgPanelSaveFailed: {
+		LangEnglish:            "Settings could not be saved. The previous value is retained.",
+		LangChinese:            "设置保存失败，已保留原设置。",
+		LangTraditionalChinese: "設定儲存失敗，已保留原設定。",
+		LangJapanese:           "保存できませんでした。以前の設定を保持しています。",
+		LangSpanish:            "No se pudo guardar. Se conserva el valor anterior.",
+	},
+	MsgPanelSendFailed: {
+		LangEnglish:            "Could not update the panel. Please open /panel again.",
+		LangChinese:            "面板更新失败，请重新打开 /panel。",
+		LangTraditionalChinese: "面板更新失敗，請重新開啟 /panel。",
+		LangJapanese:           "更新に失敗しました。/panel を開き直してください。",
+		LangSpanish:            "No se pudo actualizar. Abre /panel de nuevo.",
+	},
+	MsgPanelSettingsScope: {
+		LangEnglish:            "Scope: project %s / %s. Shared with the web console; applies to the next request.",
+		LangChinese:            "作用范围：项目 %s / %s。与 Web 控制台同步，下次请求生效。",
+		LangTraditionalChinese: "作用範圍：專案 %s / %s。與 Web 控制台同步，下次請求生效。",
+		LangJapanese:           "範囲：プロジェクト %s / %s。Web 設定と共有し、次のリクエストから有効です。",
+		LangSpanish:            "Ámbito: proyecto %s / %s. Compartido con la consola web; se aplica a la próxima petición.",
+	},
+	MsgPanelHide: {
+		LangEnglish:            "Hide progress after the answer",
+		LangChinese:            "答案发送后隐藏执行过程",
+		LangTraditionalChinese: "答案傳送後隱藏執行過程",
+		LangJapanese:           "回答後に進捗を非表示",
+		LangSpanish:            "Ocultar progreso tras la respuesta",
+	},
+	MsgPanelIdle: {
+		LangEnglish:            "Idle",
+		LangChinese:            "空闲",
+		LangTraditionalChinese: "閒置",
+		LangJapanese:           "待機中",
+		LangSpanish:            "Inactivo",
+	},
+	MsgPanelRunning: {
+		LangEnglish:            "Generating",
+		LangChinese:            "生成中",
+		LangTraditionalChinese: "生成中",
+		LangJapanese:           "生成中",
+		LangSpanish:            "Generando",
+	},
+	MsgPanelSummary: {
+		LangEnglish:            "📁 Project: %s\n\n📂 Workspace\n%s\n\n💬 Session: %s\n🤖 Model: %s\nStatus: %s",
+		LangChinese:            "📁 项目：%s\n\n📂 工作区\n%s\n\n💬 会话：%s\n🤖 模型：%s\n状态：%s",
+		LangTraditionalChinese: "📁 專案：%s\n\n📂 工作區\n%s\n\n💬 對話：%s\n🤖 模型：%s\n狀態：%s",
+		LangJapanese:           "📁 プロジェクト：%s\n\n📂 作業場所\n%s\n\n💬 セッション：%s\n🤖 モデル：%s\n状態：%s",
+		LangSpanish:            "📁 Proyecto: %s\n\n📂 Espacio\n%s\n\n💬 Sesión: %s\n🤖 Modelo: %s\nEstado: %s",
+	},
+	MsgPanelModelScope: {
+		LangEnglish:            "Applies to the current workspace agent (project agent in single-workspace mode), from the next request.",
+		LangChinese:            "作用于当前工作区的 Agent；单工作区模式下作用于项目 Agent。下一次请求生效。",
+		LangTraditionalChinese: "作用於目前工作區的 Agent；單工作區模式下作用於專案 Agent。下次請求生效。",
+		LangJapanese:           "現在の作業場所の Agent に適用します。単一作業場所ではプロジェクト全体に適用し、次のリクエストから有効です。",
+		LangSpanish:            "Afecta al agente del espacio actual (al del proyecto en modo único), desde la próxima petición.",
+	},
+	MsgPanelKeyboard: {
+		LangEnglish:            "Use the buttons below to manage this conversation.",
+		LangChinese:            "可以使用下方快捷按钮管理会话。",
+		LangTraditionalChinese: "可使用下方快捷按鈕管理對話。",
+		LangJapanese:           "下のボタンでセッションを管理できます。",
+		LangSpanish:            "Usa los botones inferiores para gestionar la conversación.",
+	},
+	MsgKey("panel"): {
+		LangEnglish:            "Open control panel",
+		LangChinese:            "打开控制面板",
+		LangTraditionalChinese: "開啟控制面板",
+		LangJapanese:           "操作パネルを開く",
+		LangSpanish:            "Abrir panel de control",
+	},
+
 	MsgStarting: {
 		LangEnglish:            "⏳ Processing...",
 		LangChinese:            "⏳ 处理中...",
@@ -904,6 +1045,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⚠️ 後台任務請求使用工具 `%s` 的權限，但已自動拒絕（目前無活躍會話）。請發送訊息或使用 `/yolo` 授權後續請求。",
 		LangJapanese:           "⚠️ バックグラウンドタスクがツール `%s` の権限を要求しましたが、自動的に拒否されました（アクティブなユーザーターンなし）。メッセージを送信するか `/yolo` を使用して今後のリクエストを承認してください。",
 		LangSpanish:            "⚠️ Una tarea en segundo plano solicitó permiso para `%s` pero se denegó automáticamente (sin turno de usuario activo). Envía un mensaje o usa `/yolo` para aprobar solicitudes futuras.",
+	},
+	MsgSessionWriterBusy: {
+		LangEnglish:            "⚠️ This conversation is held by another Codex process and cannot continue here yet. Its history has been preserved.",
+		LangChinese:            "⚠️ 此会话正被其他 Codex 进程占用，暂时无法从这里继续。历史记录已保留。",
+		LangTraditionalChinese: "⚠️ 此會話正被其他 Codex 程序佔用，暫時無法從這裡繼續。歷史記錄已保留。",
+		LangJapanese:           "⚠️ この会話は別の Codex プロセスが使用中です。ここではまだ続行できません。履歴は保持されています。",
+		LangSpanish:            "⚠️ Otro proceso de Codex está usando esta conversación. Aún no se puede continuar aquí. El historial se ha conservado.",
 	},
 	MsgSessionNotFound: {
 		LangEnglish:            "⚠️ Session expired. Use /new to start a fresh conversation.",
@@ -4614,3 +4762,29 @@ func (i *I18n) Tf(key MsgKey, args ...interface{}) string {
 	template := i.T(key)
 	return fmt.Sprintf(template, args...)
 }
+
+const (
+	MsgPanelHome             MsgKey = "panel_home"
+	MsgPanelReasoning        MsgKey = "panel_reasoning"
+	MsgPanelEffortChanged    MsgKey = "panel_effort_changed"
+	MsgPanelEffortSaveFailed MsgKey = "panel_effort_save_failed"
+	MsgPanelModels           MsgKey = "panel_models"
+	MsgPanelSessions         MsgKey = "panel_sessions"
+	MsgPanelNew              MsgKey = "panel_new"
+	MsgPanelSettings         MsgKey = "panel_settings"
+	MsgPanelStop             MsgKey = "panel_stop"
+	MsgPanelExpired          MsgKey = "panel_expired"
+	MsgPanelBusy             MsgKey = "panel_busy"
+	MsgPanelSwitched         MsgKey = "panel_switched"
+	MsgPanelEnter            MsgKey = "panel_enter"
+	MsgPanelNewConfirm       MsgKey = "panel_newconfirm"
+	MsgPanelSaveFailed       MsgKey = "panel_savefailed"
+	MsgPanelSendFailed       MsgKey = "panel_sendfailed"
+	MsgPanelSettingsScope    MsgKey = "panel_settingsscope"
+	MsgPanelHide             MsgKey = "panel_hide"
+	MsgPanelIdle             MsgKey = "panel_idle"
+	MsgPanelRunning          MsgKey = "panel_running"
+	MsgPanelSummary          MsgKey = "panel_summary"
+	MsgPanelModelScope       MsgKey = "panel_modelscope"
+	MsgPanelKeyboard         MsgKey = "panel_keyboard"
+)

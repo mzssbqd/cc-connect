@@ -489,10 +489,11 @@ type ReferenceConfig struct {
 
 // ProjectConfig binds one agent (with a specific work_dir) to one or more platforms.
 type ProjectConfig struct {
-	Name    string `toml:"name"`
-	Mode    string `toml:"mode,omitempty"`     // "" or "multi-workspace"
-	BaseDir string `toml:"base_dir,omitempty"` // parent dir for workspaces
-	SkipGit *bool  `toml:"skip_git,omitempty"`
+	Name          string `toml:"name"`
+	Mode          string `toml:"mode,omitempty"`     // "" or "multi-workspace"
+	BaseDir       string `toml:"base_dir,omitempty"` // parent dir for workspaces
+	SkipGit       *bool  `toml:"skip_git,omitempty"`
+	SingleWorkDir string `toml:"single_work_dir,omitempty"` // preserved directory to restore when leaving multi-workspace mode
 	// WorkspaceInitAllowLocalPaths allows /workspace init and the conversational
 	// init flow to bind existing local directories. Default false keeps init
 	// limited to git URLs; use /workspace bind or /workspace route for explicit
@@ -3443,6 +3444,7 @@ type ProjectSettingsUpdate struct {
 	ReplyFooter           *bool
 	InjectSender          *bool
 	PlatformAllowFrom     map[string]string
+	PlatformHideProgress  map[string]bool
 	PlatformProgressStyle map[string]string
 	// WorkspaceMode and WorkspaceBaseDir control the project-level
 	// multi-workspace feature (ProjectConfig.Mode/BaseDir), distinct from
@@ -3476,6 +3478,7 @@ func SaveProjectSettings(projectName string, update ProjectSettingsUpdate) error
 			continue
 		}
 		proj := &cfg.Projects[i]
+		wasMultiWorkspace := proj.Mode == "multi-workspace"
 		if update.AgentType != nil && *update.AgentType != proj.Agent.Type {
 			newType := *update.AgentType
 			proj.Agent.Type = newType
@@ -3581,7 +3584,19 @@ func SaveProjectSettings(projectName string, update ProjectSettingsUpdate) error
 			if strings.TrimSpace(proj.BaseDir) == "" {
 				return fmt.Errorf("workspace_base_dir is required to enable multi-workspace mode")
 			}
+			if !wasMultiWorkspace {
+				proj.SingleWorkDir, _ = proj.Agent.Options["work_dir"].(string)
+			}
 			delete(proj.Agent.Options, "work_dir")
+		} else if wasMultiWorkspace {
+			// Explicit work_dir updates take precedence over the saved directory.
+			if update.WorkDir == nil && proj.SingleWorkDir != "" {
+				if proj.Agent.Options == nil {
+					proj.Agent.Options = map[string]any{}
+				}
+				proj.Agent.Options["work_dir"] = proj.SingleWorkDir
+			}
+			proj.SingleWorkDir = ""
 		}
 		if update.PlatformAllowFrom != nil {
 			for j := range proj.Platforms {
@@ -3604,6 +3619,22 @@ func SaveProjectSettings(projectName string, update ProjectSettingsUpdate) error
 					proj.Platforms[j].Options = map[string]any{}
 				}
 				proj.Platforms[j].Options["allow_from"] = strings.TrimSpace(af)
+			}
+		}
+		for platformName, hide := range update.PlatformHideProgress {
+			found := false
+			for j := range proj.Platforms {
+				if proj.Platforms[j].Type != platformName {
+					continue
+				}
+				if proj.Platforms[j].Options == nil {
+					proj.Platforms[j].Options = map[string]any{}
+				}
+				proj.Platforms[j].Options["hide_progress_on_finish"] = hide
+				found = true
+			}
+			if !found {
+				return fmt.Errorf("platform %q not found", platformName)
 			}
 		}
 		for platformName, style := range update.PlatformProgressStyle {
@@ -3680,6 +3711,9 @@ func GetProjectConfigDetails(projectName string) map[string]any {
 			if plat.Options != nil {
 				if af, ok := plat.Options["allow_from"].(string); ok {
 					pc["allow_from"] = af
+				}
+				if hide, ok := plat.Options["hide_progress_on_finish"].(bool); ok {
+					pc["hide_progress_on_finish"] = hide
 				}
 				if style, ok := plat.Options["progress_style"].(string); ok {
 					pc["progress_style"] = style

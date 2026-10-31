@@ -31,6 +31,7 @@ type ProjectSettingsUpdate struct {
 	ReplyFooter           *bool
 	InjectSender          *bool
 	PlatformAllowFrom     map[string]string
+	PlatformHideProgress  map[string]bool
 	PlatformProgressStyle map[string]string
 	WorkspaceMode         *string
 	WorkspaceBaseDir      *string
@@ -756,6 +757,7 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 			ReplyFooter           *bool             `json:"reply_footer"`
 			InjectSender          *bool             `json:"inject_sender"`
 			PlatformAllowFrom     map[string]string `json:"platform_allow_from"`
+			PlatformHideProgress  map[string]bool   `json:"platform_hide_progress"`
 			PlatformProgressStyle map[string]string `json:"platform_progress_style"`
 			WorkspaceMode         *string           `json:"workspace_mode"`
 			WorkspaceBaseDir      *string           `json:"workspace_base_dir"`
@@ -764,7 +766,25 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 			mgmtError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		progressSetters := make(map[string]ProgressStyleSetter)
+		visibilitySetters := make(map[string][]ProgressVisibilitySetter)
+		for name := range body.PlatformHideProgress {
+			for _, platform := range e.platforms {
+				if platform.Name() == name {
+					if setter, ok := platform.(ProgressVisibilitySetter); ok {
+						visibilitySetters[name] = append(visibilitySetters[name], setter)
+					}
+				}
+			}
+			if len(visibilitySetters[name]) == 0 {
+				mgmtError(w, http.StatusBadRequest, "platform does not support progress visibility updates")
+				return
+			}
+		}
+		if len(visibilitySetters) > 0 && m.saveProjectSettings == nil {
+			mgmtError(w, http.StatusNotImplemented, "project settings persistence not configured")
+			return
+		}
+		progressSetters := make(map[string][]ProgressStyleSetter)
 		for platformName, style := range body.PlatformProgressStyle {
 			switch style {
 			case progressStyleLegacy, progressStyleCompact, progressStyleCard:
@@ -775,7 +795,7 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 			for _, platform := range e.platforms {
 				if platform.Name() == platformName {
 					if setter, ok := platform.(ProgressStyleSetter); ok {
-						progressSetters[platformName] = setter
+						progressSetters[platformName] = append(progressSetters[platformName], setter)
 					}
 				}
 			}
@@ -905,19 +925,28 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 				InjectSender:          body.InjectSender,
 				PlatformAllowFrom:     body.PlatformAllowFrom,
 				PlatformProgressStyle: body.PlatformProgressStyle,
+				PlatformHideProgress:  body.PlatformHideProgress,
 				WorkspaceMode:         body.WorkspaceMode,
 				WorkspaceBaseDir:      body.WorkspaceBaseDir,
 			}
 			if err := m.saveProjectSettings(name, patch); err != nil {
 				slog.Warn("management: failed to persist project settings", "project", name, "error", err)
-				if len(progressSetters) > 0 {
+				if len(progressSetters) > 0 || len(visibilitySetters) > 0 {
 					mgmtError(w, http.StatusInternalServerError, "failed to persist project settings")
 					return
 				}
 			}
 		}
-		for platformName, setter := range progressSetters {
-			setter.SetProgressStyle(body.PlatformProgressStyle[platformName])
+		for platformName, setters := range progressSetters {
+			for _, setter := range setters {
+				setter.SetProgressStyle(body.PlatformProgressStyle[platformName])
+			}
+		}
+
+		for name, setters := range visibilitySetters {
+			for _, setter := range setters {
+				setter.SetHideProgressOnFinish(body.PlatformHideProgress[name])
+			}
 		}
 
 		resp := map[string]any{"message": "settings updated"}

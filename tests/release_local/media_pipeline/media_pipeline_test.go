@@ -222,6 +222,23 @@ func newMediaEngine(t *testing.T) (*core.Engine, *recordingAgent, *mediaPlatform
 	t.Cleanup(func() {
 		engine.Stop()
 		_ = agent.Stop()
+		// Stop cancels workers; wait for their final session writes before
+		// testing removes the temporary store directory.
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			busy := false
+			for _, session := range engine.GetSessions().AllSessions() {
+				busy = busy || session.Busy()
+			}
+			if !busy {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Error("media workers did not stop before cleanup")
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 	})
 	return engine, agent, platform
 }

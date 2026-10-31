@@ -3007,6 +3007,46 @@ func TestSaveProjectSettings_MultiWorkspaceNeverPersistsSingleWorkDir(t *testing
 	if cfg.Projects[0].Agent.Options["work_dir"] != staleWorkDir {
 		t.Fatal("returning to single-workspace mode must accept a working directory")
 	}
+	if cfg.Projects[0].SingleWorkDir != "" {
+		t.Fatal("explicit directory override must clear the saved directory")
+	}
+}
+
+func TestSaveProjectSettings_WorkspaceRoundTripRestoresWorkDir(t *testing.T) {
+	for _, single := range []string{"", "single"} {
+		t.Run("mode="+single, func(t *testing.T) {
+			configPath := writeConfigFixture(t, feishuConfigFixture)
+			patchConfigPath(t, configPath)
+			original, stale, base := t.TempDir(), t.TempDir(), t.TempDir()
+			if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{WorkDir: &original}); err != nil {
+				t.Fatal(err)
+			}
+			multi := "multi-workspace"
+			for range 2 {
+				if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{WorkspaceMode: &multi, WorkspaceBaseDir: &base}); err != nil {
+					t.Fatal(err)
+				}
+				// Simulate an old client's general-settings save while in multi-workspace mode.
+				if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{WorkDir: &stale}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := Load(configPath); err != nil {
+					t.Fatal(err)
+				}
+				// The Web console submits only workspace mode and base directory here.
+				if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{WorkspaceMode: &single, WorkspaceBaseDir: &base}); err != nil {
+					t.Fatal(err)
+				}
+				cfg, err := Load(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := cfg.Projects[0].Agent.Options["work_dir"]; got != original {
+					t.Fatalf("restored work_dir = %v, want %q", got, original)
+				}
+			}
+		})
+	}
 }
 
 func TestGetProjectConfigDetails(t *testing.T) {
@@ -3680,5 +3720,38 @@ func TestRemoveGlobalProvider_CleansUpProviderRefs(t *testing.T) {
 	refs2 := cfg.Projects[1].Agent.ProviderRefs
 	if len(refs2) != 0 {
 		t.Errorf("proj2 provider_refs: want [], got %v", refs2)
+	}
+}
+
+func TestSaveProjectSettings_HideProgressPersistsFalseAndPreservesOptions(t *testing.T) {
+	path := writeConfigFixture(t, feishuConfigFixture)
+	patchConfigPath(t, path)
+	before := readConfigFixture(t, path).Projects[0].Platforms[0].Options
+	for _, hide := range []bool{true, false, true} {
+		if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{PlatformHideProgress: map[string]bool{"telegram": hide}}); err != nil {
+			t.Fatal(err)
+		}
+		opts := readConfigFixture(t, path).Projects[0].Platforms[0].Options
+		if opts["hide_progress_on_finish"] != hide || opts["token"] != before["token"] || opts["allow_from"] != before["allow_from"] {
+			t.Fatal("visibility update lost values")
+		}
+		details := GetProjectConfigDetails("alpha")["platform_configs"].([]map[string]any)
+		if details[0]["hide_progress_on_finish"] != hide {
+			t.Fatal("settings readback lost false or true")
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveProjectSettings("alpha", ProjectSettingsUpdate{PlatformHideProgress: map[string]bool{"missing": true}}); err == nil {
+		t.Fatal("missing platform accepted")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(after) {
+		t.Fatal("invalid update changed disk")
 	}
 }

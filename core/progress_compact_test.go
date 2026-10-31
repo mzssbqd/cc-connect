@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -425,5 +426,105 @@ func TestCompactProgressWriter_CancellationStopsRecovery(t *testing.T) {
 	}
 	if w.Finalize(ProgressCardStateCompleted) {
 		t.Fatal("cancelled final update should report failure")
+	}
+}
+
+// cleanupProgressPlatform records visible messages and deletion order.
+type cleanupProgressPlatform struct {
+	stubPlatformEngine
+	progressMu sync.Mutex
+	hide       bool
+	previews   map[int]string
+	nextID     int
+	operations []string
+	deleteErr  error
+	sendErr    error
+}
+
+func (p *cleanupProgressPlatform) ProgressStyle() string { return "legacy" }
+func (p *cleanupProgressPlatform) HideProgressOnFinish() bool {
+	p.progressMu.Lock()
+	defer p.progressMu.Unlock()
+	return p.hide
+}
+func (p *cleanupProgressPlatform) SetHideProgressOnFinish(hide bool) {
+	p.progressMu.Lock()
+	defer p.progressMu.Unlock()
+	p.hide = hide
+}
+func (p *cleanupProgressPlatform) SendPreviewStart(_ context.Context, _ any, content string) (any, error) {
+	p.progressMu.Lock()
+	defer p.progressMu.Unlock()
+	if p.previews == nil {
+		p.previews = map[int]string{}
+	}
+	p.nextID++
+	p.previews[p.nextID] = content
+	p.operations = append(p.operations, "preview")
+	return p.nextID, nil
+}
+func (p *cleanupProgressPlatform) UpdateMessage(_ context.Context, handle any, content string) error {
+	p.progressMu.Lock()
+	defer p.progressMu.Unlock()
+	p.previews[handle.(int)] = content
+	return nil
+}
+func (p *cleanupProgressPlatform) DeletePreviewMessage(_ context.Context, handle any) error {
+	p.progressMu.Lock()
+	defer p.progressMu.Unlock()
+	if p.deleteErr != nil {
+		return p.deleteErr
+	}
+	delete(p.previews, handle.(int))
+	p.operations = append(p.operations, "delete")
+	return nil
+}
+func (p *cleanupProgressPlatform) Send(ctx context.Context, rctx any, content string) error {
+	p.progressMu.Lock()
+	err := p.sendErr
+	if err == nil {
+		p.operations = append(p.operations, "send:"+content)
+	}
+	p.progressMu.Unlock()
+	if err != nil {
+		return err
+	}
+	return p.stubPlatformEngine.Send(ctx, rctx, content)
+}
+func (p *cleanupProgressPlatform) snapshotProgress() (int, []string) {
+	p.progressMu.Lock()
+	defer p.progressMu.Unlock()
+	return len(p.previews), append([]string(nil), p.operations...)
+}
+
+func TestProgressCleanup_SnapshotFailureAndCancellation(t *testing.T) {
+	for _, scenario := range []string{"success", "disabled", "failed", "cancelled", "delete-error", "changed-mid-turn"} {
+		t.Run(scenario, func(t *testing.T) {
+			p := &cleanupProgressPlatform{hide: scenario != "disabled"}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			w := newCompactProgressWriter(ctx, p, nil, "test", LangEnglish, nil)
+			w.AppendEvent(ProgressEntryThinking, "thinking", "", "thinking")
+			switch scenario {
+			case "failed":
+				w.Finalize(ProgressCardStateFailed)
+			case "cancelled":
+				cancel()
+			case "delete-error":
+				p.deleteErr = errors.New("rejected")
+			case "changed-mid-turn":
+				p.SetHideProgressOnFinish(false)
+			}
+			w.CleanupAfterReply()
+			n, ops := p.snapshotProgress()
+			shouldDelete := scenario == "success" || scenario == "changed-mid-turn"
+			deleted := len(ops) > 0 && ops[len(ops)-1] == "delete"
+			if deleted != shouldDelete {
+				t.Fatalf("unexpected cleanup: %v", ops)
+			}
+			if !shouldDelete && scenario != "disabled" && n != 1 {
+				t.Fatal("failed turn lost progress")
+			}
+		})
 	}
 }

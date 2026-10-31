@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -9,9 +10,10 @@ import (
 )
 
 type projectStateData struct {
-	WorkDirOverride         string            `json:"work_dir_override,omitempty"`
-	WorkspaceDirOverrides   map[string]string `json:"workspace_dir_overrides,omitempty"`
-	WorkspaceModelOverrides map[string]string `json:"workspace_model_overrides,omitempty"`
+	WorkspaceReasoningOverrides map[string]string `json:"workspace_reasoning_overrides,omitempty"`
+	WorkDirOverride             string            `json:"work_dir_override,omitempty"`
+	WorkspaceDirOverrides       map[string]string `json:"workspace_dir_overrides,omitempty"`
+	WorkspaceModelOverrides     map[string]string `json:"workspace_model_overrides,omitempty"`
 }
 
 // ProjectStateStore persists lightweight runtime state for one project.
@@ -149,4 +151,36 @@ func (ps *ProjectStateStore) load() {
 		return
 	}
 	ps.state = state
+}
+
+func (ps *ProjectStateStore) ReasoningOverride(workspace string) string {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	return ps.state.WorkspaceReasoningOverrides[workspace]
+}
+
+// SaveReasoningOverride commits the selection before changing the live agent.
+func (ps *ProjectStateStore) SaveReasoningOverride(workspace, effort string) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	next := ps.state
+	next.WorkspaceReasoningOverrides = make(map[string]string, len(ps.state.WorkspaceReasoningOverrides)+1)
+	for k, v := range ps.state.WorkspaceReasoningOverrides {
+		next.WorkspaceReasoningOverrides[k] = v
+	}
+	next.WorkspaceReasoningOverrides[workspace] = effort
+	if ps.storePath != "" {
+		data, err := json.MarshalIndent(next, "", "  ")
+		if err != nil {
+			return fmt.Errorf("project_state: encode reasoning: %w", err)
+		}
+		if err = os.MkdirAll(filepath.Dir(ps.storePath), 0755); err != nil {
+			return fmt.Errorf("project_state: create directory: %w", err)
+		}
+		if err = AtomicWriteFile(ps.storePath, data, 0644); err != nil {
+			return fmt.Errorf("project_state: save reasoning: %w", err)
+		}
+	}
+	ps.state = next
+	return nil
 }

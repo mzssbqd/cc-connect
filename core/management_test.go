@@ -79,7 +79,12 @@ type mgmtResponse struct {
 	Error string          `json:"error,omitempty"`
 }
 
-type managementProgressPlatform struct{ stubCompactProgressPlatform }
+type managementProgressPlatform struct {
+	stubCompactProgressPlatform
+	hide bool
+}
+
+func (p *managementProgressPlatform) SetHideProgressOnFinish(hide bool) { p.hide = hide }
 
 func (p *managementProgressPlatform) SetProgressStyle(style string) { p.style = style }
 
@@ -129,6 +134,33 @@ func TestMgmt_ProjectProgressStylePersistsAndAppliesWithoutRestart(t *testing.T)
 	result = mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{"platform_progress_style": map[string]string{"test": "invalid"}})
 	if result.OK {
 		t.Fatal("invalid progress style should be rejected")
+	}
+}
+
+func TestMgmt_ProjectProgressStyleUpdatesAllMatchingInstances(t *testing.T) {
+	m, ts, engine := testManagementServer(t, "tok")
+	makePlatform := func(name string) *managementProgressPlatform {
+		return &managementProgressPlatform{stubCompactProgressPlatform: stubCompactProgressPlatform{stubPlatformEngine: stubPlatformEngine{n: name}, style: "compact"}}
+	}
+	first, second, other := makePlatform("test"), makePlatform("test"), makePlatform("other")
+	engine.platforms = []Platform{first, other, second}
+	m.SetSaveProjectSettings(func(_ string, patch ProjectSettingsUpdate) error {
+		if first.ProgressStyle() != "compact" || second.ProgressStyle() != "compact" {
+			t.Error("runtime changed before persistence")
+		}
+		return nil
+	})
+	result := mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{"platform_progress_style": map[string]string{"test": "card"}})
+	if !result.OK {
+		t.Fatal(result.Error)
+	}
+	if first.ProgressStyle() != "card" || second.ProgressStyle() != "card" || other.ProgressStyle() != "compact" {
+		t.Fatalf("styles: first=%s second=%s other=%s", first.ProgressStyle(), second.ProgressStyle(), other.ProgressStyle())
+	}
+	m.SetSaveProjectSettings(func(string, ProjectSettingsUpdate) error { return errors.New("disk full") })
+	result = mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{"platform_progress_style": map[string]string{"test": "compact"}})
+	if result.OK || first.ProgressStyle() != "card" || second.ProgressStyle() != "card" {
+		t.Fatal("failed persistence must leave all instances unchanged")
 	}
 }
 
@@ -3173,5 +3205,51 @@ func TestMgmt_ProjectWorkspaces_BindRejectsPathOutsideBaseDir(t *testing.T) {
 	}
 	if !strings.Contains(r.Error, "escapes base_dir") {
 		t.Fatalf("error = %q, want escapes base_dir", r.Error)
+	}
+}
+
+func TestMgmt_ProjectProgressVisibilityPersistsAllInstances(t *testing.T) {
+	m, ts, engine := testManagementServer(t, "tok")
+	first := &managementProgressPlatform{stubCompactProgressPlatform: stubCompactProgressPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
+	second := &managementProgressPlatform{stubCompactProgressPlatform: stubCompactProgressPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
+	engine.platforms = []Platform{first, second}
+	stored := false
+	m.SetSaveProjectSettings(func(_ string, patch ProjectSettingsUpdate) error {
+		stored = patch.PlatformHideProgress["test"]
+		return nil
+	})
+	m.SetGetProjectConfig(func(string) map[string]any {
+		return map[string]any{"platform_configs": []map[string]any{{"type": "test", "hide_progress_on_finish": stored}}}
+	})
+	for _, hide := range []bool{true, false, true} {
+		result := mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{"platform_hide_progress": map[string]bool{"test": hide}})
+		if !result.OK || first.hide != hide || second.hide != hide || stored != hide {
+			t.Fatalf("save failed: %+v", result)
+		}
+		result = mgmtGet(t, ts.URL+"/api/v1/projects/test-project", "tok")
+		var detail struct {
+			Platforms []struct {
+				Hide bool `json:"hide_progress_on_finish"`
+			} `json:"platform_configs"`
+		}
+		if err := json.Unmarshal(result.Data, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if len(detail.Platforms) != 1 || detail.Platforms[0].Hide != hide {
+			t.Fatal("reload lost preference")
+		}
+	}
+	m.SetSaveProjectSettings(func(string, ProjectSettingsUpdate) error { return errors.New("disk full") })
+	result := mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{"platform_hide_progress": map[string]bool{"test": false}})
+	if result.OK || !first.hide || !second.hide {
+		t.Fatal("failed persistence changed runtime")
+	}
+	result = mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{"platform_hide_progress": map[string]bool{"missing": true}})
+	if result.OK {
+		t.Fatal("unknown platform accepted")
+	}
+	result = mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{"platform_hide_progress": map[string]string{"test": "false"}})
+	if result.OK {
+		t.Fatal("invalid boolean accepted")
 	}
 }

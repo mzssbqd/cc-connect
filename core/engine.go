@@ -369,13 +369,15 @@ type Engine struct {
 	attachmentSendEnabled bool
 	startedAt             time.Time
 
-	providerSaveFunc        func(providerName string) error
-	providerAddSaveFunc     func(p ProviderConfig) error
-	providerRemoveSaveFunc  func(name string) error
-	providerModelSaveFunc   func(providerName, model string) error
-	providerRefsSaveFunc    func(refs []string) error
-	listGlobalProvidersFunc func(agentType string) ([]ProviderConfig, error)
-	modelSaveFunc           func(model string) error
+	providerSaveFunc           func(providerName string) error
+	providerAddSaveFunc        func(p ProviderConfig) error
+	providerRemoveSaveFunc     func(name string) error
+	providerModelSaveFunc      func(providerName, model string) error
+	providerRefsSaveFunc       func(refs []string) error
+	listGlobalProvidersFunc    func(agentType string) ([]ProviderConfig, error)
+	modelSaveFunc              func(model string) error
+	panelMu                    sync.Mutex
+	progressVisibilitySaveFunc func(platform string, hide bool) error
 
 	ttsSaveFunc func(mode string) error
 
@@ -1454,6 +1456,13 @@ func (e *Engine) SetBaseWorkDir(dir string) {
 
 func (e *Engine) SetProjectStateStore(store *ProjectStateStore) {
 	e.projectState = store
+	if store != nil {
+		if rs, ok := e.agent.(ReasoningEffortSwitcher); ok {
+			if effort := store.ReasoningOverride(workspaceModelOverrideKey("", "", e.agent)); effort != "" {
+				rs.SetReasoningEffort(effort)
+			}
+		}
+	}
 }
 
 func (e *Engine) SetDataDir(dir string) {
@@ -4207,6 +4216,9 @@ func (e *Engine) getOrCreateWorkspaceAgent(workspace string) (Agent, *SessionMan
 	opts["work_dir"] = workspace
 
 	if e.projectState != nil {
+		if effort := e.projectState.ReasoningOverride(workspace); effort != "" {
+			opts["reasoning_effort"] = effort
+		}
 		if m := e.projectState.WorkspaceModelOverride(workspace); m != "" {
 			opts["model"] = m
 		}
@@ -5406,6 +5418,7 @@ type agentErrorHandler struct {
 
 var agentErrorHandlers = []agentErrorHandler{
 	{"Session not found", MsgSessionNotFound},
+	{"already has an active writer", MsgSessionWriterBusy},
 }
 
 func (e *Engine) processInteractiveEvents(state *interactiveState, session *Session, sessions *SessionManager, sessionKey string, msgID string, turnStart time.Time, stopTypingFn func(), sendDone <-chan error, replyCtx any, lockGen uint64) {
@@ -6582,6 +6595,10 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				}
 			}
 
+			if !isSilent {
+				cp.CleanupAfterReply()
+			}
+
 			if elapsed := time.Since(replyStart); elapsed >= slowPlatformSend {
 				slog.Warn("slow final reply send", "platform", p.Name(), "elapsed", elapsed, "response_len", len(fullResponse))
 			}
@@ -7052,6 +7069,7 @@ var builtinCommands = []struct {
 	names []string
 	id    string
 }{
+	{[]string{"panel"}, "panel"},
 	{[]string{"new"}, "new"},
 	{[]string{"list", "sessions"}, "list"},
 	{[]string{"switch"}, "switch"},
@@ -7251,6 +7269,8 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 	}
 
 	switch cmdID {
+	case "panel":
+		e.cmdPanel(p, msg, args)
 	case "new":
 		e.cmdNew(p, msg, args)
 	case "list":

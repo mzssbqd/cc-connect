@@ -83,7 +83,7 @@ const (
 
 func newScopedEngine(t *testing.T) (*Engine, *stubPlatformEngine, *scopedKeyPlatform, string) {
 	t.Helper()
-	baseDir := t.TempDir()
+	baseDir := normalizeWorkspacePath(t.TempDir())
 	shared := normalizeWorkspacePath(filepath.Join(baseDir, "repo-shared"))
 	other := normalizeWorkspacePath(filepath.Join(baseDir, "repo-other"))
 	for _, dir := range []string{shared, other} {

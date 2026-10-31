@@ -40,7 +40,7 @@ func (a *catalogSkillAgent) ListSkills(context.Context) ([]*Skill, error) {
 
 func newCatalogSkillsEngine(t *testing.T, p Platform) (*Engine, *catalogSkillAgent) {
 	t.Helper()
-	base := t.TempDir()
+	base := normalizeWorkspacePath(t.TempDir())
 	root := filepath.Join(base, ".agents", "skills")
 	// The directory provider deliberately exposes files outside the native
 	// allowlist, including a disabled sibling in the same skill root.
@@ -108,7 +108,7 @@ func writeWorkspaceSkill(t *testing.T, root, name, body string) {
 }
 func newWorkspaceSkillsEngine(t *testing.T, p Platform) (*Engine, string, string) {
 	t.Helper()
-	base := t.TempDir()
+	base := normalizeWorkspacePath(t.TempDir())
 	a, b, global := filepath.Join(base, "a"), filepath.Join(base, "b"), filepath.Join(base, "global")
 	for _, ws := range []string{a, b} {
 		writeWorkspaceSkill(t, filepath.Join(ws, ".agents", "skills"), filepath.Base(ws)+"-only", "Unique "+filepath.Base(ws))

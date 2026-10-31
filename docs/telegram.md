@@ -96,9 +96,9 @@ token = "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz-123456"
 # proxy_username = ""
 # proxy_password = ""
 
-# Show progress while working; collapse it into an expandable quote when done.
-# The final answer is sent separately. Failed progress stays expanded.
-progress_style = "card"
+# Show thinking/tool progress while working; delete it after the answer is delivered.
+# Enabled by default. Set false to retain progress; failed/cancelled turns retain it.
+hide_progress_on_finish = true
 ```
 
 > **Common mistake:** `admin_from` goes under `[[projects]]` (project level), NOT inside `[projects.platforms.options]`. If placed in the wrong section, it will be silently ignored.
@@ -106,10 +106,17 @@ progress_style = "card"
 > To find your Telegram user ID, send any message to **@userinfobot**.
 
 In the Web console, open **Projects → your project → Settings → Telegram replies**.
-Enable **Collapse progress after completion** and save. The setting is stored in
-`config.toml` and applies to new messages without restarting the service. Turn it
-off to keep completed progress expanded. Only the execution log is folded; the
-final answer stays in a separate message. Failed execution remains expanded.
+Use **Hide progress after replying** and save. The setting is stored in
+`config.toml` and applies to new turns without restarting the service. Each turn
+keeps the setting it started with. Thinking and tool activity remain visible while
+working; after the final answer is delivered successfully, the progress message
+is deleted. Turning the setting off retains progress. Failed or cancelled turns,
+and failed answer deliveries, keep progress for troubleshooting. If deletion
+fails, the answer remains visible and the failure is logged.
+
+With this setting enabled, progress uses a single editable text message even if
+`progress_style = "legacy"` is configured. The old `card` value is accepted as an
+alias for `compact`; Telegram no longer uses expandable progress quotations.
 
 ### 2.1 Optional: Use a Proxy
 
@@ -230,6 +237,38 @@ Telegram topics include a `message_thread_id`. cc-connect uses that thread ID
 as part of the Telegram session key, so each topic has its own independent
 conversation context. This applies to forum topics in groups and private chat
 topics when Telegram includes `message_thread_id`.
+
+---
+
+## Button control panel
+
+The model page includes **Reasoning effort** for agents that support it. Choose
+an offered level; a checkmark identifies the current selection. The choice is
+saved per workspace and restored after restart. It takes effect on the next
+message without clearing conversation history. Changes are blocked while a reply
+is running. The original `/reasoning` command remains available.
+
+Send `/panel` (also available in Telegram's command menu) to open the control
+panel. Private chats get a collapsible keyboard with Control panel, Sessions,
+Switch model, and New session shortcuts. Existing slash commands remain available.
+
+The buttons below the panel update that same message. Models and sessions are
+paginated; selecting a session opens its details before **Enter session** switches
+the active conversation. **New session** asks for confirmation and preserves old
+sessions and history. During generation, stop the current response or wait for it
+to finish before changing models or sessions.
+
+The Settings page toggles **Hide progress after the answer** for the current
+project/platform. It uses the same persisted configuration as the Web console,
+and applies to subsequent requests. Model selection applies to the current
+workspace agent (the project agent in single-workspace mode).
+
+Buttons are bound to their originating user, chat, topic, message and workspace.
+A previous page, a service restart, or 24 hours of inactivity invalidates inline
+buttons; reopen `/panel` to refresh. Private-chat keyboard shortcuts remain usable
+after restart. Their exact emoji-prefixed labels are reserved commands; ordinary
+text without those prefixes continues to go to the model. Panels are separate
+from execution-progress messages and are never removed by progress cleanup.
 
 ---
 

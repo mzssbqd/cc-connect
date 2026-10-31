@@ -772,6 +772,10 @@ func TestAvailableModels_BackgroundRefreshUpdatesDiskCache(t *testing.T) {
 
 	waitForModelsInPersistentCache(t, cachePath, []string{"fresh/model", "second/model"})
 
+	// The atomic file rename precedes publishing the in-memory snapshot. Wait
+	// for the refresh to finish before asserting both views are synchronized.
+	agent.(*Agent).refreshWg.Wait()
+
 	got = switcher.AvailableModels(context.Background())
 	if len(got) != 2 || got[0].Name != "fresh/model" || got[1].Name != "second/model" {
 		t.Fatalf("AvailableModels() after refresh = %v, want refreshed cache", got)

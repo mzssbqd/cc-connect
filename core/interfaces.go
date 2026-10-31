@@ -286,6 +286,17 @@ type ProgressStyleSetter interface {
 	SetProgressStyle(style string)
 }
 
+// ProgressVisibilityProvider controls cleanup of execution progress after a successful reply.
+// The engine snapshots this preference per turn.
+type ProgressVisibilityProvider interface {
+	HideProgressOnFinish() bool
+}
+
+// ProgressVisibilitySetter updates the preference for subsequent turns.
+type ProgressVisibilitySetter interface {
+	SetHideProgressOnFinish(hide bool)
+}
+
 // ProgressCardPayloadSupport is an optional interface for platforms that can
 // parse and render structured progress-card payloads.
 type ProgressCardPayloadSupport interface {
@@ -715,4 +726,11 @@ const (
 // updating the visual status of a preview card header.
 type PreviewStatusUpdater interface {
 	SetPreviewStatus(previewHandle any, status CardStatus)
+}
+
+// PanelSender renders a navigable control panel. Actions return through the normal
+// message handler as /panel commands so normal authorization and routing apply.
+// The adapter binds opaque button tokens to the message, user and chat.
+type PanelSender interface {
+	SendPanel(ctx context.Context, msg *Message, card *Card, shortcuts [][]ButtonOption, keyboardText, expiredText string) error
 }

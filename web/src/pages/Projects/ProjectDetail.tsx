@@ -84,7 +84,7 @@ export default function ProjectDetail() {
   const [replyFooter, setReplyFooter] = useState(true);
   const [injectSender, setInjectSender] = useState(false);
   const [platformAllowFrom, setPlatformAllowFrom] = useState<Record<string, string>>({});
-  const [platformProgressStyle, setPlatformProgressStyle] = useState<Record<string, string>>({});
+  const [platformHideProgress, setPlatformHideProgress] = useState<Record<string, boolean>>({});
   const [settingsError, setSettingsError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -199,11 +199,11 @@ export default function ProjectDetail() {
           if (pc.allow_from !== undefined) afMap[pc.type] = pc.allow_from;
         });
         setPlatformAllowFrom(afMap);
-        const progressMap: Record<string, string> = {};
+        const progressMap: Record<string, boolean> = {};
         proj.value.platform_configs?.forEach(pc => {
-          if (pc.type === 'telegram') progressMap[pc.type] = pc.progress_style || 'compact';
+          if (pc.type === 'telegram') progressMap[pc.type] = pc.hide_progress_on_finish ?? true;
         });
-        setPlatformProgressStyle(progressMap);
+        setPlatformHideProgress(progressMap);
       }
       if (provs.status === 'fulfilled') {
         setProviders(provs.value.providers || []);
@@ -270,7 +270,7 @@ export default function ProjectDetail() {
         reply_footer: replyFooter,
         inject_sender: injectSender,
         platform_allow_from: platformAllowFrom,
-        platform_progress_style: platformProgressStyle,
+        platform_hide_progress: platformHideProgress,
       });
       if (res && (res as any).restart_required) {
         setShowRestartModal(true);
@@ -830,19 +830,19 @@ export default function ProjectDetail() {
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">{t('projects.telegramReplies')}</h3>
             <div className="flex items-center justify-between gap-4 max-w-lg">
               <div>
-                <label id="telegram-collapse-label" className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('projects.collapseProgress')}</label>
-                <p id="telegram-collapse-hint" className="text-xs text-gray-500 dark:text-gray-400 mt-1">{t('projects.collapseProgressHint')}</p>
+                <label id="telegram-hide-label" className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('projects.hideProgress')}</label>
+                <p id="telegram-hide-hint" className="text-xs text-gray-500 dark:text-gray-400 mt-1">{t('projects.hideProgressHint')}</p>
               </div>
               <button
                 type="button"
                 role="switch"
-                aria-checked={platformProgressStyle.telegram === 'card'}
-                aria-labelledby="telegram-collapse-label"
-                aria-describedby="telegram-collapse-hint"
-                onClick={() => setPlatformProgressStyle(prev => ({ ...prev, telegram: prev.telegram === 'card' ? 'compact' : 'card' }))}
-                className={cn('w-10 h-6 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2', platformProgressStyle.telegram === 'card' ? 'bg-accent' : 'bg-gray-300 dark:bg-gray-700')}
+                aria-checked={platformHideProgress.telegram === true}
+                aria-labelledby="telegram-hide-label"
+                aria-describedby="telegram-hide-hint"
+                onClick={() => setPlatformHideProgress(prev => ({ ...prev, telegram: !prev.telegram }))}
+                className={cn('w-10 h-6 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2', platformHideProgress.telegram === true ? 'bg-accent' : 'bg-gray-300 dark:bg-gray-700')}
               >
-                <span className={cn('block w-4 h-4 bg-white rounded-full transition-transform mx-1', platformProgressStyle.telegram === 'card' ? 'translate-x-4' : 'translate-x-0')} />
+                <span className={cn('block w-4 h-4 bg-white rounded-full transition-transform mx-1', platformHideProgress.telegram === true ? 'translate-x-4' : 'translate-x-0')} />
               </button>
             </div>
           </Card>

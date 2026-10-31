@@ -32,6 +32,7 @@ type replyContext struct {
 	chatID    int64
 	threadID  int
 	messageID int
+	panel     bool
 }
 
 // telegramBot abstracts the Telegram bot API methods for testability.
@@ -105,12 +106,19 @@ func (t *stdlibTypingTicker) C() <-chan time.Time { return t.Ticker.C }
 type botFactory func(token string, onUpdate func(context.Context, *models.Update), httpClient *http.Client) (telegramBot, *models.User, func(context.Context), error)
 
 type Platform struct {
+	panelMu          sync.Mutex
+	panelDispatchMu  sync.Mutex
+	panelTokens      map[string]panelToken
+	panelKeyboards   map[string]map[string]string
+	panelExpiredText string
+
 	token                 string
 	allowFrom             string
 	groupReplyAll         bool
 	shareSessionInChannel bool
 	enableReactions       bool
 	progressStyle         string // "legacy" | "compact" — telegram has no rich card, so "card" is mapped to "compact"
+	hideProgressOnFinish  bool
 	httpClient            *http.Client
 
 	mu                  sync.RWMutex
@@ -164,8 +172,7 @@ func New(opts map[string]any) (core.Platform, error) {
 	shareSessionInChannel, _ := opts["share_session_in_channel"].(bool)
 	enableReactions, _ := opts["enable_reactions"].(bool)
 
-	// Keep the existing compact default. Opt into "card" to fold completed
-	// progress into Telegram's expandable block quotations.
+	// Telegram uses text previews; retain card as a compatibility alias for compact.
 	progressStyle := "compact"
 	if v, ok := opts["progress_style"].(string); ok {
 		switch strings.ToLower(strings.TrimSpace(v)) {
@@ -176,13 +183,19 @@ func New(opts map[string]any) (core.Platform, error) {
 		case "compact":
 			progressStyle = "compact"
 		case "card":
-			progressStyle = "card"
+			progressStyle = "compact"
 		default:
 			return nil, fmt.Errorf("telegram: invalid progress_style %q (want legacy, compact, or card)", v)
 		}
 	}
 
+	hideProgress := true
+	if v, ok := opts["hide_progress_on_finish"].(bool); ok {
+		hideProgress = v
+	}
+
 	return &Platform{
+		hideProgressOnFinish:  hideProgress,
 		token:                 token,
 		allowFrom:             allowFrom,
 		groupReplyAll:         groupReplyAll,
@@ -203,8 +216,8 @@ func (p *Platform) Name() string { return "telegram" }
 // 30k+ characters) in one final p.Send — users perceive it as "spinner spins
 // for minutes, then a wall of text appears".
 //
-// To restore the old single-send behavior set progress_style = "legacy" in
-// the platform options.
+// To restore separate progress messages set progress_style = "legacy" and
+// hide_progress_on_finish = false in the platform options.
 func (p *Platform) ProgressStyle() string {
 	if p == nil {
 		return "compact"
@@ -220,7 +233,23 @@ func (p *Platform) ProgressStyle() string {
 func (p *Platform) SetProgressStyle(style string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if style == "card" {
+		style = "compact"
+	}
 	p.progressStyle = style
+}
+
+// HideProgressOnFinish is captured at the beginning of each turn.
+func (p *Platform) HideProgressOnFinish() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.hideProgressOnFinish
+}
+
+func (p *Platform) SetHideProgressOnFinish(hide bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.hideProgressOnFinish = hide
 }
 
 func (p *Platform) Start(handler core.MessageHandler) error {
@@ -593,6 +622,10 @@ func (p *Platform) handleMessage(ctx context.Context, msg *models.Message) {
 }
 
 func (p *Platform) dispatchMessage(msg *core.Message, tgMsg *models.Message) {
+	if action := core.PanelShortcutAction(msg.Content); action != "" {
+		msg.Content = "/panel " + action
+	}
+
 	// Enrich with platform-specific context (reply quotes, location text, etc.)
 	var extras []string
 	if replyText := enrichReplyContent(tgMsg); replyText != "" {
@@ -840,6 +873,11 @@ func (p *Platform) handleCallbackQuery(ctx context.Context, cb *models.CallbackQ
 		chatName = msg.Chat.Title
 	}
 	rctx := replyContext{chatID: chatID, threadID: threadID, messageID: msgID}
+
+	if strings.HasPrefix(data, "panel:") {
+		p.handlePanelCallback(ctx, bot, cb, sessionKey, channelKey, userID, userName, chatName, rctx)
+		return
+	}
 
 	emptyMarkup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{}}
 
@@ -1436,7 +1474,7 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 		return nil, err
 	}
 
-	html, plain := renderTelegramPreview(content)
+	html := core.MarkdownToSimpleHTML(content)
 	params := &tgbot.SendMessageParams{
 		ChatID:          rc.chatID,
 		MessageThreadID: rc.threadID,
@@ -1455,7 +1493,7 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 				"html_prefix", truncateForLog(html, 200),
 				"html_len", len(html),
 			)
-			params.Text = plain
+			params.Text = content
 			params.ParseMode = ""
 			sent, err = bot.SendMessage(ctx, params)
 		} else if strings.Contains(errMsg, "message is too long") {
@@ -1465,7 +1503,7 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 				"html_len", len(html),
 				"content_len", len(content),
 			)
-			params.Text = plain
+			params.Text = content
 			params.ParseMode = ""
 			sent, err = bot.SendMessage(ctx, params)
 		}
@@ -1487,7 +1525,7 @@ func (p *Platform) UpdateMessage(ctx context.Context, previewHandle any, content
 		return err
 	}
 
-	html, plain := renderTelegramPreview(content)
+	html := core.MarkdownToSimpleHTML(content)
 	slog.Debug("telegram: UpdateMessage",
 		"content_len", len(content), "html_len", len(html),
 		"content_prefix", truncateForLog(content, 80),
@@ -1513,7 +1551,7 @@ func (p *Platform) UpdateMessage(ctx context.Context, previewHandle any, content
 				"html_prefix", truncateForLog(html, 200),
 				"html_len", len(html),
 			)
-			params.Text = plain
+			params.Text = content
 			params.ParseMode = ""
 			if _, err2 := bot.EditMessageText(ctx, params); err2 != nil {
 				if strings.Contains(err2.Error(), "not modified") {

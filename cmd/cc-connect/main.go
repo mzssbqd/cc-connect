@@ -939,6 +939,9 @@ func main() {
 			}
 			return result, nil
 		})
+		engine.SetProgressVisibilitySaveFunc(func(platform string, hide bool) error {
+			return config.SaveProjectSettings(projName, config.ProjectSettingsUpdate{PlatformHideProgress: map[string]bool{platform: hide}})
+		})
 		engine.SetModelSaveFunc(func(model string) error {
 			return config.SaveAgentModel(projName, model)
 		})
@@ -1185,6 +1188,7 @@ func main() {
 				InjectSender:          u.InjectSender,
 				PlatformAllowFrom:     u.PlatformAllowFrom,
 				PlatformProgressStyle: u.PlatformProgressStyle,
+				PlatformHideProgress:  u.PlatformHideProgress,
 				WorkspaceMode:         u.WorkspaceMode,
 				WorkspaceBaseDir:      u.WorkspaceBaseDir,
 			})

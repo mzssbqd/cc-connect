@@ -216,10 +216,12 @@ type compactProgressWriter struct {
 	updater MessageUpdater
 	handle  any
 
-	enabled    bool
-	failed     bool
-	style      string
-	usePayload bool
+	hideOnFinish bool
+	failedTurn   bool
+	enabled      bool
+	failed       bool
+	style        string
+	usePayload   bool
 
 	content    string
 	entries    []string
@@ -307,6 +309,14 @@ func newCompactProgressWriter(ctx context.Context, p Platform, replyCtx any, age
 		agentName:  normalizeProgressAgentLabel(agentName),
 		lang:       lang,
 		maxEntries: 10,
+	}
+	if pref, ok := p.(ProgressVisibilityProvider); ok && pref.HideProgressOnFinish() {
+		if _, ok := p.(PreviewCleaner); ok {
+			w.hideOnFinish = true
+			// A single editable preview gives cleanup a concrete message handle,
+			// including deployments previously configured with legacy progress.
+			w.style = progressStyleCompact
+		}
 	}
 	if throttler, ok := p.(ProgressUpdateThrottler); ok {
 		w.minUpdateInterval = throttler.ProgressUpdateInterval()
@@ -506,6 +516,9 @@ func (w *compactProgressWriter) AppendStructured(item ProgressCardEntry, fallbac
 // Finalize updates card progress state (running/completed/failed) without
 // appending a new progress entry.
 func (w *compactProgressWriter) Finalize(state ProgressCardState) bool {
+	if state == ProgressCardStateFailed {
+		w.failedTurn = true
+	}
 	if !w.enabled || w.failed || w.style != progressStyleCard || !w.usePayload || w.handle == nil {
 		return false
 	}
@@ -526,6 +539,25 @@ func (w *compactProgressWriter) Finalize(state ProgressCardState) bool {
 	}
 	w.lastSent = w.content
 	return true
+}
+
+// CleanupAfterReply removes only this turn's progress, after the answer was delivered.
+// Errors and cancellation retain progress for troubleshooting.
+func (w *compactProgressWriter) CleanupAfterReply() {
+	if !w.hideOnFinish || w.failedTurn || w.handle == nil || w.ctx.Err() != nil {
+		return
+	}
+	cleaner, ok := w.platform.(PreviewCleaner)
+	if !ok {
+		return
+	}
+	ctx, cancel := w.withAPITimeout()
+	defer cancel()
+	if err := cleaner.DeletePreviewMessage(ctx, w.handle); err != nil {
+		slog.Warn("progress cleanup failed", "platform", w.platform.Name(), "error", err)
+		return
+	}
+	w.handle = nil
 }
 
 func (w *compactProgressWriter) withAPITimeout() (context.Context, context.CancelFunc) {

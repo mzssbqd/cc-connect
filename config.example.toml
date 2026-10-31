@@ -733,6 +733,8 @@ level = "info" # debug, info, warn, error
 # automatically. Use /workspace init <url> to clone and bind a new repo.
 # 单个 bot 服务多个工作区。频道名称自动映射到 ~/workspace/<频道名>。
 # 使用 /workspace init <url> 克隆并绑定新仓库。
+# Web mode switches preserve the original work_dir in project.single_work_dir and restore it on return to single mode.
+# Web 切换模式时，原 work_dir 自动保存在项目级 single_work_dir 中，切回单工作区时恢复。
 #
 # [[projects]]
 # name = "claude-multi"
@@ -1208,11 +1210,11 @@ app_secret = "your-feishu-app-secret"
 # group_reply_all = false  # If true, respond to ALL group messages without @mention / 设为 true 群聊无需 @ 也响应
 # share_session_in_channel = false  # If true, all users in a group share one agent session / 群聊共享会话
 # enable_reactions = false  # If true, add ⚡ reaction to incoming messages / 设为 true 收到消息时添加 ⚡ 表情
-# progress_style = "card"  # legacy | compact (default) | card
-#                          # "card": show live progress, then fold completed thinking/tool output into an expandable quote.
-#                          # Final answers stay separate. Failed progress remains expanded for troubleshooting.
-#                          # "card"：实时显示执行过程，完成后折叠思考和工具调用，最终答案单独显示；失败时保留展开状态。
-#                          # "compact" retains the progress text; "legacy" sends separate progress messages.
+# progress_style = "compact"  # legacy | compact (default); "card" is a compatibility alias for compact.
+# hide_progress_on_finish = true  # Delete thinking/tool progress after successfully delivering the answer.
+#                                 # Set false to keep progress. Failed or cancelled turns retain progress.
+#                                 # 答案发送成功后删除思考和工具调用过程；设为 false 保留。失败或取消时保留。
+#                                 # When enabled, progress uses one editable message even with legacy configured.
 
 # Matrix (uncomment to enable / 取消注释以启用)
 # 1. Create an account on your Matrix homeserver (matrix.org or self-hosted)

@@ -2796,3 +2796,188 @@ type reasoningJourneyPlatform struct {
 func (p *reasoningJourneyPlatform) SetCardNavigationHandler(h CardNavigationHandler) {
 	p.navigation = h
 }
+
+// Three requests exercise successful cleanup, disabling it, and a failed delivery.
+func TestCUJ_P1_ProgressDisappearsOnlyAfterAnswerDelivery(t *testing.T) {
+	p := &cleanupProgressPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}, hide: true}
+	a := &cujAgent{}
+	e := NewEngine("test", a, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
+	t.Cleanup(func() { _ = e.Stop() })
+	e.SetDisplayConfig(DisplayCfg{ThinkingMessages: true, ToolMessages: true})
+	for turn := 0; turn < 3; turn++ {
+		p.SetHideProgressOnFinish(turn != 1)
+		p.progressMu.Lock()
+		if turn == 2 {
+			p.sendErr = errors.New("delivery failed")
+		}
+		p.progressMu.Unlock()
+		answer := fmt.Sprintf("final answer %d", turn)
+		a.setNextSessionEvents([]Event{
+			{Type: EventThinking, Content: "working"},
+			{Type: EventToolUse, ToolName: "shell", ToolInput: "echo ok"},
+			{Type: EventResult, Content: answer, Done: true},
+		}, 5)
+		key := fmt.Sprintf("test:user%d", turn)
+		e.ReceiveMessage(p, &Message{SessionKey: key, Platform: "test", UserID: fmt.Sprintf("user%d", turn), Content: "do work", ReplyCtx: "ctx"})
+		deadline := time.Now().Add(3 * time.Second)
+		completed := false
+		for time.Now().Before(deadline) {
+			_, ops := p.snapshotProgress()
+			done := false
+			if turn == 0 {
+				done = len(ops) > 0 && ops[len(ops)-1] == "delete"
+			} else if turn == 1 {
+				done = strings.Contains(strings.Join(p.getSent(), "\n"), answer)
+			} else {
+				p.progressMu.Lock()
+				done = p.nextID == 2
+				p.progressMu.Unlock()
+				done = done && !e.sessions.GetOrCreateActive(key).Busy()
+			}
+			if done {
+				completed = true
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		if !completed {
+			t.Fatalf("turn %d did not finish", turn)
+		}
+		n, ops := p.snapshotProgress()
+		if turn == 0 {
+			joined := strings.Join(ops, "\n")
+			if n != 0 || !strings.Contains(joined, answer) || len(ops) == 0 || ops[len(ops)-1] != "delete" {
+				t.Fatalf("answer must precede deletion: %v", ops)
+			}
+		} else if turn == 1 {
+			if !strings.Contains(strings.Join(p.getSent(), "\n"), "working") || !strings.Contains(strings.Join(p.getSent(), "\n"), answer) {
+				t.Fatal("disabled cleanup must retain progress and answer")
+			}
+		} else if n != 1 {
+			t.Fatalf("failed delivery must retain progress: %v", ops)
+		}
+	}
+}
+
+// Panel buttons must preserve history, resolve stable IDs after list reordering,
+// and coexist with the original /history and /list commands.
+func TestCUJ_P2_PanelSwitchPreservesHistory(t *testing.T) {
+	e, p, a, send := newPanelTest(t)
+	old := e.sessions.SwitchToAgentSession("test:user", "session-a", a.Name(), "Alpha")
+	old.AddHistory("user", "original conversation marker")
+	send("/panel sessions")
+	selectA := panelAction(t, p.card, "session session-a")
+	// Agent discovery order can change after the list was rendered.
+	a.sessions[0], a.sessions[1] = a.sessions[1], a.sessions[0]
+	send("/panel new")
+	send(panelAction(t, p.card, "create"))
+	if !strings.Contains(p.card.RenderText(), "New session") {
+		t.Fatal(p.card.RenderText())
+	}
+	send(selectA)
+	if !strings.Contains(p.card.RenderText(), "Alpha") {
+		t.Fatal(p.card.RenderText())
+	}
+	send(panelAction(t, p.card, "switch session-a"))
+	if !strings.Contains(p.card.RenderText(), "Session switched") {
+		t.Fatal(p.card.RenderText())
+	}
+	send("/history")
+	replies := p.getSent()
+	if !strings.Contains(replies[len(replies)-1], "original conversation marker") {
+		t.Fatal(replies)
+	}
+	send("/list")
+	replies = p.getSent()
+	if !strings.Contains(replies[len(replies)-1], "Alpha") {
+		t.Fatal(replies)
+	}
+}
+
+// Writer conflicts show a useful message and preserve conversation history.
+func TestCUJ_P3_WriterConflictPreservesHistory(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	s := &originJourneySession{events: make(chan Event, 8)}
+	a := &originJourneyAgent{session: s}
+	e := NewEngine("origin", a, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
+	t.Cleanup(func() { e.Stop() })
+	send := func(text string) {
+		e.ReceiveMessage(p, &Message{SessionKey: "test:user", Platform: "test", UserID: "user", Content: text})
+	}
+	wait := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			for _, m := range p.getSent() {
+				if strings.Contains(m, want) && !e.sessions.GetOrCreateActive("test:user").Busy() {
+					return
+				}
+			}
+			time.Sleep(time.Millisecond * 5)
+		}
+		t.Fatalf("missing %q: %v", want, p.getSent())
+	}
+	send("remember original marker")
+	wait("first answer")
+	send("/list")
+	wait("original title")
+	send("next message")
+	wait(e.i18n.T(MsgSessionWriterBusy))
+	send("/history")
+	wait("remember original marker")
+	for _, m := range p.getSent() {
+		if strings.Contains(m, "✈") || strings.Contains(m, "thread-store conflict") {
+			t.Fatal(m)
+		}
+	}
+	if e.sessions.GetOrCreateActive("test:user").GetAgentSessionID() != "origin-thread" {
+		t.Fatal("writer conflict replaced original thread")
+	}
+}
+
+type originJourneySession struct {
+	stubAgentSession
+	events chan Event
+	turns  int
+}
+
+func (s *originJourneySession) Events() <-chan Event     { return s.events }
+func (s *originJourneySession) CurrentSessionID() string { return "origin-thread" }
+func (s *originJourneySession) Send(string, string, []ImageAttachment, []FileAttachment) error {
+	s.turns++
+	if s.turns == 1 {
+		s.events <- Event{Type: EventResult, Done: true, Content: "first answer"}
+	} else {
+		s.events <- Event{Type: EventError, Error: errors.New("thread-store conflict: thread origin-thread already has an active writer")}
+	}
+	return nil
+}
+
+type originJourneyAgent struct {
+	stubAgent
+	session *originJourneySession
+}
+
+func (a *originJourneyAgent) StartSession(context.Context, string) (AgentSession, error) {
+	return a.session, nil
+}
+func (a *originJourneyAgent) ListSessions(context.Context) ([]AgentSessionInfo, error) {
+	return []AgentSessionInfo{{ID: "origin-thread", Summary: "original title"}}, nil
+}
+
+func TestCUJ_P4_PanelEffortKeepsConversation(t *testing.T) {
+	e, p, _, send := newPanelTest(t)
+	e.agent = &stubModelModeAgent{reasoningEffort: "low"}
+	e.sessions.GetOrCreateActive("test:user").AddHistory("user", "effort history marker")
+	send("/panel models")
+	send(panelAction(t, p.card, "efforts"))
+	send(panelAction(t, p.card, "effort high"))
+	if !strings.Contains(p.card.RenderText(), "next message") {
+		t.Fatal(p.card.RenderText())
+	}
+	send("/history")
+	sent := p.getSent()
+	if !strings.Contains(strings.Join(sent, "\n"), "effort history marker") {
+		t.Fatal(sent)
+	}
+}

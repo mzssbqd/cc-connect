@@ -57,7 +57,10 @@ func TestSkillsMetadataProcess(t *testing.T) {
 }
 
 func TestListSkills_ExcludesClaudeDisabledAndCachedSkills(t *testing.T) {
-	tmp := t.TempDir()
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	workDir := filepath.Join(tmp, "workspace")
 	codexHome := filepath.Join(tmp, "codex")
 	setTestHome(t, tmp)

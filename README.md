@@ -726,3 +726,7 @@ MIT License
 <p align="center">
   <sub>Built with ❤️ by the cc-connect community</sub>
 </p>
+
+## Source layout
+
+See [Project structure](docs/project-structure.md) for package responsibilities, startup flow and build dependencies.
